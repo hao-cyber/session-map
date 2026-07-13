@@ -1,0 +1,68 @@
+import { join } from "node:path";
+import { ActionRouter } from "./actions.ts";
+import { Logger } from "./logger.ts";
+import { SessionMonitor } from "./monitor.ts";
+import { MaintrailHttpServer } from "./server.ts";
+import { InstanceLock, StateStore } from "./state.ts";
+import { TranscriptWatcher } from "./watcher.ts";
+import { TreeRuntime } from "./tree.ts";
+
+export interface AppOptions {
+  stateDirectory: string;
+  port?: number;
+  watch?: boolean;
+}
+
+export class MaintrailApp {
+  readonly logger: Logger;
+  readonly lock: InstanceLock;
+  readonly store: StateStore;
+  readonly runtime: TreeRuntime;
+  readonly actions: ActionRouter;
+  readonly monitor: SessionMonitor;
+  readonly watcher: TranscriptWatcher;
+  readonly http: MaintrailHttpServer;
+  #closed = false;
+
+  constructor(readonly options: AppOptions) {
+    this.logger = new Logger(join(options.stateDirectory, "server.log"));
+    this.lock = new InstanceLock(options.stateDirectory);
+    this.lock.acquire();
+    try {
+      this.store = new StateStore(options.stateDirectory, this.logger);
+      this.runtime = new TreeRuntime(this.store);
+      this.actions = new ActionRouter(this.store);
+      this.monitor = new SessionMonitor(this.store, this.logger);
+      this.watcher = new TranscriptWatcher(this.store, this.runtime, process.cwd(), this.logger);
+      this.http = new MaintrailHttpServer({
+        store: this.store,
+        runtime: this.runtime,
+        actions: this.actions,
+        monitor: this.monitor,
+        logger: this.logger,
+      }, {
+        stateDirectory: options.stateDirectory,
+        ...(options.port !== undefined ? { port: options.port } : {}),
+      });
+    } catch (error) {
+      this.lock.release();
+      throw error;
+    }
+  }
+
+  start(): void {
+    this.monitor.start();
+    if (this.options.watch !== false) this.watcher.start();
+    this.logger.info("Maintrail started", { url: this.http.url, pid: process.pid });
+  }
+
+  stop(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    this.watcher.stop();
+    this.monitor.stop();
+    this.http.stop();
+    this.lock.release();
+    this.logger.info("Maintrail stopped", { pid: process.pid });
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "name": "maintrail",
+  "version": "0.1.0",
+  "license": "MIT",
+  "author": "Hao",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hao-cyber/maintrail.git"
+  },
+  "homepage": "https://github.com/hao-cyber/maintrail#readme",
+  "bugs": "https://github.com/hao-cyber/maintrail/issues",
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "developer-tools",
+    "thinking-tree",
+    "session-management"
+  ],
+  "type": "module",
+  "description": "A persistent external thinking tree for parallel AI coding sessions",
+  "bin": {
+    "maintrail": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "web",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "dev": "MAINTRAIL_DEV=1 bun --watch src/cli.ts serve",
+    "start": "bun src/cli.ts serve",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check:web": "bun run scripts/check-web.ts",
+    "build": "bun run scripts/build.ts",
+    "release:mac": "bun run scripts/release-macos.ts",
+    "prepublishOnly": "bun run check",
+    "check": "bun run typecheck && bun run check:web && bun test && bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.13",
+    "d3": "^7.9.0",
+    "lucide-static": "^1.24.0",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "bun": ">=1.3.13"
+  },
+  "packageManager": "bun@1.3.13"
+}

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#091017" />
+    <title>Maintrail — agent thinking map</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+    <script nonce="__MAINTRAIL_NONCE__">
+      window.MAINTRAIL_TOKEN = "__MAINTRAIL_TOKEN__";
+      window.MAINTRAIL_ASSET_VERSION = "__MAINTRAIL_ASSET_VERSION__";
+      window.addEventListener("load", () => {
+        setTimeout(() => {
+          if (window.MAINTRAIL_READY) return;
+          const key = "maintrail.asset-reload";
+          if (!sessionStorage.getItem(key)) {
+            sessionStorage.setItem(key, "1");
+            location.reload();
+          }
+        }, 1800);
+      });
+    </script>
+    <script defer src="/assets/vendor/d3.min.js"></script>
+    <script defer src="/assets/vendor/markmap-lib.js"></script>
+    <script defer src="/assets/vendor/markmap-view.js"></script>
+    <script defer src="/assets/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar" aria-label="Maintrail 状态栏">
+      <div class="brand-block">
+        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div>
+          <strong>Maintrail</strong>
+          <span id="status-line">正在读取工作线…</span>
+        </div>
+      </div>
+      <div id="git-chips" class="git-chips" aria-label="有例外的工作目录"></div>
+      <div class="toolbar">
+        <button id="archived-button" class="quiet-button" type="button" hidden>
+          <span class="icon icon-archive" aria-hidden="true"></span>
+          <span id="archived-count">已归档 0</span>
+        </button>
+        <label class="engine-control">
+          <span>Roll</span>
+          <select id="engine-select" aria-label="Roll 引擎"></select>
+        </label>
+      </div>
+    </header>
+
+    <section id="now-bar" class="now-bar" aria-label="现在该看哪"></section>
+
+    <main id="map-shell">
+      <svg id="mindmap" role="tree" aria-label="Maintrail 思维树"></svg>
+      <div id="loading" class="loading-state">
+        <span class="busy-dot"></span>
+        <span>重建思维路径</span>
+      </div>
+      <button id="fit-button" class="fit-button" type="button" title="适合视图">
+        <span class="icon icon-zoom-in" aria-hidden="true"></span>
+        <span>Fit</span>
+      </button>
+      <div class="lod-legend" aria-hidden="true">
+        <span>全景</span><i></i><span>转折</span><i></i><span>细节</span>
+      </div>
+    </main>
+
+    <aside id="archive-drawer" class="archive-drawer" aria-label="已归档主线" hidden>
+      <div class="drawer-head">
+        <div><span class="eyebrow">对象恒存</span><h2>已归档主线</h2></div>
+        <button class="icon-button" id="archive-close" type="button" aria-label="关闭">
+          <span class="icon icon-x"></span>
+        </button>
+      </div>
+      <p>归档只移出阅读面；session 继续生长，记忆不会删除。</p>
+      <div id="archive-list" class="archive-list"></div>
+    </aside>
+
+    <div id="say-overlay" class="say-overlay" hidden>
+      <form id="say-form" class="say-box">
+        <span class="eyebrow">发给当前 session</span>
+        <label id="say-label" for="say-input">消息</label>
+        <textarea id="say-input" rows="3" maxlength="8000" autocomplete="off"></textarea>
+        <div class="say-actions"><span>⌥ + 点击 · Enter 发送 · Shift+Enter 换行</span><button type="submit"><span class="icon icon-send"></span>发送</button></div>
+      </form>
+    </div>
+
+    <div id="toast-region" class="toast-region" aria-live="polite"></div>
+    <noscript>Maintrail 需要 JavaScript 来渲染本地思维树。</noscript>
+  </body>
+</html>
