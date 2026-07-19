@@ -59,7 +59,13 @@ final class ServiceModel: ObservableObject {
       guard let self else { return }
       await self.ensureService()
       while !Task.isCancelled {
-        if self.isReady { await self.refreshSnapshot() }
+        if self.isReady {
+          await self.refreshSnapshot()
+        } else if await self.healthCheck() {
+          self.phase = .ready
+          await self.refreshSnapshot()
+          NotificationCenter.default.post(name: .sessionMapReload, object: nil)
+        }
         try? await Task.sleep(nanoseconds: 4_000_000_000)
       }
     }
