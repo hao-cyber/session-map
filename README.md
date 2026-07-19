@@ -16,7 +16,7 @@ SessionMap 不是 session 看板。一级对象是一件正在推进的工作，
 - **用模型判断语义归属。** session 是否继续已有主线、哪里发生转折、用户正在被要求做什么，都由 roll 模型判断；cwd、关键词和正则不能替代这些判断。
 - **对象恒存。** 工作线和 session 入口只会衰减或归档，不会静默消失。终端关闭后，同一入口会变成 resume 动作。
 - **有界且崩溃安全。** 树和 transcript offset 同住一个原子替换的 JSON 文件；roll 按 at-most-once 提交，模型输入不随 transcript 总长度增长。
-- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`，所有 `/api/*` 都需要本机 capability token。
+- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`；除同源的一次性 open ticket 兑换外，业务 `/api/*` 都需要本机 capability token。
 
 ## 安装与体验
 

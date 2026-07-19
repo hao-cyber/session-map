@@ -23,6 +23,10 @@
   的 `sessionStorage` 并清理地址栏。公开根页面、URL、日志不得泄露长期 token。
 - 页面完成首次 snapshot 与地图渲染后才发送 open ready。401 清除当前 tab 的失效
   capability 并明确提示运行 `sessionmap open`；不得把鉴权失败归为临时服务故障。
+- open ticket 在 ready 成功前保留于当前 tab；若兑换后、ready 前服务重启导致 open ID
+  丢失，页面必须用仍有效的 ticket 重新登记并回执，成功或过期后立即清除 ticket。
+  若同一服务进程中页面在 ready 前 reload，已有 token/open ID 时不得重复兑换并把 409
+  误判为失效；应继续首次渲染与 ready 回执。
 - HTML 中每个 JS/CSS/vendor 入口都必须携带由完整嵌入式 Web bundle 内容生成的版本；
   CSS 引用的图标同样带版本。只有匹配当前版本的资产响应可以使用 immutable 缓存，
   无版本或版本不匹配的请求必须 `no-store`，避免新 HTML 与旧 JS 跨版本混装。

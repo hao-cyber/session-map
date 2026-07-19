@@ -52,18 +52,27 @@ export function escapeHtml(value: unknown): string {
 }
 
 const MARKDOWN_ENTITIES: Record<string, string> = {
+  "!": "&#33;",
+  "#": "&#35;",
+  "+": "&#43;",
+  "-": "&#45;",
+  ".": "&#46;",
   "[": "&#91;",
   "]": "&#93;",
   "(": "&#40;",
   ")": "&#41;",
   "\\": "&#92;",
+  "`": "&#96;",
+  "{": "&#123;",
+  "|": "&#124;",
+  "}": "&#125;",
   "*": "&#42;",
   "~": "&#126;",
   _: "&#95;",
 };
 
 export function escapeMarkdown(value: unknown): string {
-  return escapeHtml(value).replaceAll(/[\[\]()\\*~_]/g, (char) => MARKDOWN_ENTITIES[char] ?? char);
+  return escapeHtml(value).replaceAll(/[!#+\-.\[\]()\\`{|}*~_]/g, (char) => MARKDOWN_ENTITIES[char] ?? char);
 }
 
 export function defaultStateDirectory(home = homedir()): string {

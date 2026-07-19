@@ -29,15 +29,18 @@ describe("safe rendering and attention ordering", () => {
     const store = new StateStore(directory());
     const runtime = new TreeRuntime(store);
     await runtime.applyRoll(transcriptMeta("s", process.cwd()), {
-      mainline: "[x](javascript:alert(1)) <b>x</b>",
+      mainline: "# [x](javascript:alert(1)) `code` <b>x</b>",
       ask: { kind: "none", hint: "" },
       ops: [{ op: "grow", parent: "mainline", type: "note", label: "<img src=x>" }],
     });
     const markdown = renderMarkdown(store.snapshot());
     expect(markdown).not.toContain("[x](javascript:");
     expect(markdown).not.toContain("<b>x</b>");
+    expect(markdown).not.toContain("`code`");
     expect(markdown).not.toContain("<img src=x>");
     expect(markdown).toContain("&#91;x&#93;&#40;javascript:alert&#40;1&#41;&#41;");
+    expect(markdown).toContain("&#35; &#91;x&#93;");
+    expect(markdown).toContain("&#96;code&#96;");
     expect(markdown).toContain("&lt;img src=x&gt;");
   });
 

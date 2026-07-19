@@ -144,6 +144,7 @@ export async function installLaunchAgent(
   const path = launchAgentPath(LAUNCHD_LABEL, home);
   const legacyPath = launchAgentPath(LEGACY_LAUNCHD_LABEL, home);
   const legacyInstalled = existsSync(legacyPath);
+  const stateDirectoryExisted = existsSync(stateDirectory);
   const domain = `gui/${options.userId ?? process.getuid?.() ?? 501}`;
   const previousPlist = existsSync(path) ? readFileSync(path, "utf8") : null;
   const executableInstall = installCompiledExecutable(home, executable);
@@ -152,7 +153,13 @@ export async function installLaunchAgent(
     // Freeze the legacy writer before copying its append-only offsets and
     // tree. Every following migration/install step lives inside this rollback
     // boundary so even malformed legacy JSON cannot leave the old service off.
-    if (legacyInstalled) await runCommand(["/bin/launchctl", "bootout", domain, legacyPath], 10_000);
+    if (legacyInstalled) {
+      const stopped = await runCommand(["/bin/launchctl", "bootout", domain, legacyPath], 10_000);
+      const alreadyStopped = /could not find specified service|no such process|not loaded/i.test(stopped.text);
+      if (!stopped.ok && !alreadyStopped) {
+        throw new Error(`could not freeze legacy Maintrail writer: ${stopped.text.trim() || "launchctl bootout failed"}`);
+      }
+    }
 
     const shouldMigrate = resolve(stateDirectory) === defaultStateDirectory(home);
     migration = shouldMigrate
@@ -175,7 +182,9 @@ export async function installLaunchAgent(
     if (!await waitForHealthy()) throw new Error("SessionMap service did not become healthy");
   } catch (error) {
     await runCommand(["/bin/launchctl", "bootout", domain, path], 10_000);
-    if (migration.migrated) rmSync(stateDirectory, { recursive: true, force: true });
+    if (migration.migrated || !stateDirectoryExisted) {
+      rmSync(stateDirectory, { recursive: true, force: true });
+    }
     try {
       if (previousPlist === null) rmSync(path, { force: true });
       else {

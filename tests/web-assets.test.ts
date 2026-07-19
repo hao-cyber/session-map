@@ -49,7 +49,7 @@ describe("offline browser bundle", () => {
 
   test("separates session disclosure from terminal navigation", () => {
     const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
-    expect(app).toContain("const SESSION_CLICK_DELAY_MS = 260");
+    expect(app).toContain("const SESSION_CLICK_DELAY_MS = 350");
     expect(app).toContain("function scheduleSessionToggle(row)");
     expect(app).toContain('row.dataset.action === "session"');
     expect(app).toContain("cancelSessionToggle(row.dataset.nodeId)");
@@ -74,6 +74,10 @@ describe("offline browser bundle", () => {
     expect(html).not.toContain('fragment.get("cap")');
     expect(app).toContain('fetch("/api/open/exchange"');
     expect(app).toContain('post("/api/open/ready"');
+    expect(app).toContain("await exchangeOpenTicket()");
+    expect(app).toContain("clearOpenHandshake()");
+    expect(app).toContain("const hasPendingExchange = window.SESSIONMAP_OPEN_TICKET");
+    expect(app).toContain("if (hasPendingExchange) await exchangeOpenTicket()");
     expect(app).toContain('headers.set("X-SessionMap-Token"');
     expect(app).not.toContain("x-maintrail-token");
     expect(app).toContain("访问凭据已失效 · 请重新运行 sessionmap open");

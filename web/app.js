@@ -3,7 +3,7 @@
 
   const POLL_MS = 4_000;
   const DRAG_THRESHOLD = 5;
-  const SESSION_CLICK_DELAY_MS = 260;
+  const SESSION_CLICK_DELAY_MS = 350;
   const capabilityKey = "sessionmap.capability.v1";
   const openTicketKey = "sessionmap.open-ticket.v1";
   const openIdKey = "sessionmap.open-id.v1";
@@ -124,8 +124,15 @@
     sessionStorage.setItem(capabilityKey, payload.token);
     sessionStorage.setItem(openIdKey, payload.openId);
     sessionStorage.setItem(openExpiryKey, String(payload.expiresAt));
+  }
+
+  function clearOpenHandshake() {
     sessionStorage.removeItem(openTicketKey);
+    sessionStorage.removeItem(openIdKey);
+    sessionStorage.removeItem(openExpiryKey);
     window.SESSIONMAP_OPEN_TICKET = "";
+    window.SESSIONMAP_OPEN_ID = "";
+    window.SESSIONMAP_OPEN_EXPIRY = 0;
   }
 
   async function acknowledgeOpen() {
@@ -133,18 +140,21 @@
     if (!openId) return;
     try {
       await post("/api/open/ready", { openId });
-      sessionStorage.removeItem(openIdKey);
-      sessionStorage.removeItem(openExpiryKey);
-      window.SESSIONMAP_OPEN_ID = "";
-      window.SESSIONMAP_OPEN_EXPIRY = 0;
-    } catch {
-      // A service restart can race the first frame. Keep the id and retry
-      // after the next successful snapshot while the CLI is still waiting.
+      clearOpenHandshake();
+    } catch (error) {
+      // A restart forgets the in-memory open id. The signed ticket remains in
+      // sessionStorage only until ready succeeds, so it can re-register once.
+      if (error?.status === 404 && window.SESSIONMAP_OPEN_TICKET &&
+          Date.now() <= Number(window.SESSIONMAP_OPEN_EXPIRY || 0)) {
+        try {
+          await exchangeOpenTicket();
+          await post("/api/open/ready", { openId: window.SESSIONMAP_OPEN_ID });
+          clearOpenHandshake();
+          return;
+        } catch {}
+      }
       if (Date.now() > Number(window.SESSIONMAP_OPEN_EXPIRY || 0)) {
-        sessionStorage.removeItem(openIdKey);
-        sessionStorage.removeItem(openExpiryKey);
-        window.SESSIONMAP_OPEN_ID = "";
-        window.SESSIONMAP_OPEN_EXPIRY = 0;
+        clearOpenHandshake();
       }
     }
   }
@@ -797,11 +807,8 @@
     } catch (error) {
       if (error?.status === 401) {
         sessionStorage.removeItem(capabilityKey);
-        sessionStorage.removeItem(openIdKey);
-        sessionStorage.removeItem(openExpiryKey);
         window.SESSIONMAP_TOKEN = "";
-        window.SESSIONMAP_OPEN_ID = "";
-        window.SESSIONMAP_OPEN_EXPIRY = 0;
+        clearOpenHandshake();
         statusLine.textContent = "访问凭据已失效 · 请重新运行 sessionmap open";
         loading.querySelector("span:last-child").textContent = "重新授权后会回到同一棵思维树";
         return false;
@@ -817,7 +824,10 @@
 
   async function boot() {
     try {
-      await exchangeOpenTicket();
+      const hasPendingExchange = window.SESSIONMAP_OPEN_TICKET &&
+        (!window.SESSIONMAP_TOKEN || !window.SESSIONMAP_OPEN_ID ||
+          Date.now() > Number(window.SESSIONMAP_OPEN_EXPIRY || 0));
+      if (hasPendingExchange) await exchangeOpenTicket();
     } catch (error) {
       sessionStorage.removeItem(openTicketKey);
       window.SESSIONMAP_OPEN_TICKET = "";

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -114,6 +114,36 @@ describe("launchd distribution", () => {
     expect(existsSync(join(fixture.home, ".local", "bin", "maintrail"))).toBeTrue();
     const bootstraps = commands.filter((command) => command[1] === "bootstrap");
     expect(bootstraps.at(-1)?.at(-1)).toBe(path);
+  });
+
+  test("aborts before migration when the legacy writer cannot be frozen", async () => {
+    const fixture = legacyFixture();
+    await expect(installLaunchAgent(fixture.current, {
+      homeDirectory: fixture.home,
+      executable: fixture.executable,
+      userId: 123,
+      runCommand: async (command) => command.at(-1)?.includes(LEGACY_LAUNCHD_LABEL) && command[1] === "bootout"
+        ? { ok: false, text: "permission denied" }
+        : { ok: true, text: "" },
+      waitForHealthy: async () => true,
+    })).rejects.toThrow("could not freeze legacy Maintrail writer");
+
+    expect(existsSync(fixture.current)).toBeFalse();
+    expect(existsSync(join(fixture.legacy, "state.json"))).toBeTrue();
+    expect(existsSync(launchAgentPath(LEGACY_LAUNCHD_LABEL, fixture.home))).toBeTrue();
+  });
+
+  test("removes a state directory created by a failed fresh install", async () => {
+    const fixture = legacyFixture();
+    rmSync(launchAgentPath(LEGACY_LAUNCHD_LABEL, fixture.home));
+    await expect(installLaunchAgent(fixture.current, {
+      homeDirectory: fixture.home,
+      executable: fixture.executable,
+      userId: 123,
+      runCommand: async () => ({ ok: true, text: "" }),
+      waitForHealthy: async () => false,
+    })).rejects.toThrow("did not become healthy");
+    expect(existsSync(fixture.current)).toBeFalse();
   });
 
 });

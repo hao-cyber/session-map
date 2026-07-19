@@ -17,9 +17,7 @@ SessionMap 会读取本机 AI coding agent transcript，并能在用户显式操
 ## 默认安全边界
 
 - 被监控的 JSONL 永远只读打开。
-- `/api/*` 全部要求权限为 `0600` 的 capability token。公开根页面不包含 token；
-  `sessionmap open` 仅通过不会发送给服务端的 URL fragment 把它
-  引导到当前 tab，写入 `sessionStorage` 后立即清理地址栏。
+- 除同源的一次性 `/api/open/exchange` 外，业务 `/api/*` 全部要求权限为 `0600` 的 capability token。公开根页面和 URL 都不包含 token；`sessionmap open` 只把 30 秒有效、可单次兑换的签名 open ticket 放进不会随请求发送的 URL fragment。页面立即清理地址栏，兑换后的 token 仅保存在当前标签页的 `sessionStorage`；ticket 会在首次渲染回执成功后删除。
 - POST 只接受 loopback Origin、`application/json`、不超过 64 KiB 的 JSON object。
 - 页面和 Markdown 对 HTML 与 Markdown 元字符做双层转义。
 - 模型 op 必须通过 schema、主线子树授权和 reattach 写边界。
