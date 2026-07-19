@@ -129,7 +129,7 @@ token 权限固定为 `0600`。从旧版 Maintrail 升级时，首次安装会�
 ## 有界数据管线
 
 ```text
-Claude / Codex append-only JSONL
+Claude / Codex / Kimi / Grok JSONL · MiniMax bounded snapshots
         │  5 秒轮询 · 32 KiB / 90 秒 linger · 45 秒冷却
         ▼
 结构信号 adapter
