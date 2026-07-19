@@ -13,5 +13,5 @@ let package = Package(
       path: "Sources/SessionMap"
     ),
   ],
-  swiftLanguageModes: [.v5]
+  swiftLanguageVersions: [.v5]
 )
