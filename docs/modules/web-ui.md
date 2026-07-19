@@ -10,7 +10,7 @@
 - `src/render.ts`：把状态投影成读取模型与安全 HTML。
 - `web/index.html`、`web/styles.css`、`web/app.js`：结构、视觉与交互。
 - `src/assets.ts`：vendored runtime 资产加载与热更新。
-- `src/server.ts`：快照、事件流和 capability 边界。
+- `src/server.ts`：快照、事件流和回环同源边界。
 
 ## 不变量
 
@@ -22,13 +22,16 @@
 - 主题形成纵向 section，session 形成稳定目录行。目录使用浏览器原生纵向滚动、滚动条
   和键盘导航；不得要求用户拖动二维画布才能找到 session。主题全貌才拥有局部平移、
   缩放与 Fit。
-- URL fragment 只接收短期一次性 open ticket；页面同源兑换 capability 后写入当前 tab
-  的 `sessionStorage` 并清理地址栏。公开根页面、URL、日志不得泄露长期 token。
-- 页面完成首次 snapshot 与地图渲染后才发送 open ready。401 清除当前 tab 的失效
-  capability 并明确提示运行 `sessionmap open`；不得把鉴权失败归为临时服务故障。
+- 任意本机现代浏览器、任意 profile 或新标签页直接打开固定地址，都读取服务端同一份
+  真实 snapshot；读取不得依赖浏览器 token、特定 tab 或 `sessionmap open`，也不得用
+  演示数据填充空白。
+- URL fragment 只接收短期一次性 open ticket，并立即清理地址栏。Ticket 只关联 CLI
+  的首次可见帧回执，不授予 snapshot 或动作权限，不写入长期浏览器凭据。
+- 页面完成首次 snapshot 与地图渲染后才发送 open ready。Ticket 过期或回执登记失败只
+  影响 CLI 的打开确认，页面仍继续直接读取本机数据。
 - open ticket 在 ready 成功前保留于当前 tab；若兑换后、ready 前服务重启导致 open ID
   丢失，页面必须用仍有效的 ticket 重新登记并回执，成功或过期后立即清除 ticket。
-  若同一服务进程中页面在 ready 前 reload，已有 token/open ID 时不得重复兑换并把 409
+  若同一服务进程中页面在 ready 前 reload，已有 open ID 时不得重复登记并把 409
   误判为失效；应继续首次渲染与 ready 回执。
 - HTML 中每个 JS/CSS/vendor 入口都必须携带由完整嵌入式 Web bundle 内容生成的版本；
   CSS 引用的图标同样带版本。只有匹配当前版本的资产响应可以使用 immutable 缓存，

@@ -16,7 +16,7 @@ SessionMap 不是 session 看板。一级对象是一件正在推进的工作，
 - **用模型判断语义归属。** session 是否继续已有主线、哪里发生转折、用户正在被要求做什么，都由 roll 模型判断；cwd、关键词和正则不能替代这些判断。
 - **对象恒存。** 工作线和 session 入口只会衰减或归档，不会静默消失。终端关闭后，同一入口会变成 resume 动作。
 - **有界且崩溃安全。** 树和 transcript offset 同住一个原子替换的 JSON 文件；roll 按 at-most-once 提交，模型输入不随 transcript 总长度增长。
-- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`；除同源的一次性 open ticket 兑换外，业务 `/api/*` 都需要本机 capability token。
+- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`；同一用户可在任意本机浏览器直接打开固定地址读取真实状态，写操作仍受回环同源与严格请求校验保护。
 
 ## 安装与体验
 
@@ -41,7 +41,9 @@ bun run build
 ./dist/sessionmap open
 ```
 
-直接输入 `http://127.0.0.1:4317` 不会获得动作权限，这是刻意的安全边界。
+安装后可在任意本机浏览器直接打开 `http://127.0.0.1:4317/`，无需先运行 `sessionmap open`
+或复用某个标签页的凭据；页面始终读取同一服务中的真实本地状态。`sessionmap open` 只是
+打开浏览器并确认首帧可见的便利命令。
 `sessionmap open` 会等到页面完成首次渲染才报告成功；系统仅接收 URL、但浏览器没有
 产生可见页面时，命令会明确失败。可用 `--browser chrome`、`--browser firefox` 或
 `--browser "Google Chrome"` 等选择任意已安装的 macOS 浏览器。
@@ -102,7 +104,7 @@ arc。正式状态默认位于：
 
 ```text
 ~/Library/Application Support/SessionMap/state.json
-~/Library/Application Support/SessionMap/capability.token
+~/Library/Application Support/SessionMap/capability.token  # 仅用于签发 CLI open 回执
 ```
 
 token 权限固定为 `0600`。从旧版 Maintrail 升级时，首次安装会原子迁移 `~/.maintrail` 中的状态和 token；旧状态保留作回滚依据，新服务验证健康后才移除旧 launchd 入口。

@@ -223,11 +223,11 @@ export class SessionMapHttpServer {
         if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
         return this.exchangeOpenTicket(await parseJsonObject(request, requestUrl));
       }
-      if (!secureEquals(request.headers.get("x-sessionmap-token") ?? "", this.token)) {
-        return json({ error: "invalid capability token" }, 401);
-      }
       if (request.method === "GET" && requestUrl.pathname === "/api/snapshot") return this.snapshot();
       if (request.method === "GET" && requestUrl.pathname === "/api/open/status") {
+        if (!secureEquals(request.headers.get("x-sessionmap-token") ?? "", this.token)) {
+          return json({ error: "invalid open handshake secret" }, 401);
+        }
         return this.openStatus(request.headers.get("x-sessionmap-open-ticket") ?? "");
       }
       if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
@@ -329,7 +329,7 @@ export class SessionMapHttpServer {
     const request = this.openRequests.get(verified.id)!;
     if (request.exchanged) throw new HttpError(409, "open ticket has already been used");
     request.exchanged = true;
-    return json({ token: this.token, openId: verified.id, expiresAt: verified.expiresAt });
+    return json({ openId: verified.id, expiresAt: verified.expiresAt });
   }
 
   async post(path: string, body: Record<string, unknown>): Promise<Response> {

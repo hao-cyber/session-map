@@ -10,7 +10,7 @@
 - `src/actions.ts`：动作决策、实时进程重解析和安全降级顺序。
 - `src/orca.ts`：可选的 Orca 查询、切换、创建与发话。
 - `src/monitor.ts`：PID、TTY、cwd、provider 与 transcript 身份证据。
-- `src/server.ts`：受 capability 保护的动作 API。
+- `src/server.ts`：受回环客户端、同源 Origin 与严格 JSON 边界保护的动作 API。
 
 ## 不变量
 

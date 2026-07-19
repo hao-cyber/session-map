@@ -49,7 +49,7 @@ Claude / Codex transcript JSONL（只读、append-only）
 Tree runtime（唯一写者）
         │  写边界、状态机、offset-before-apply、原子落盘
         ▼
-state.json + capability.token
+state.json + open 回执签名密钥
         │
         ├─ loopback HTTP API / 本地静态资源
         ├─ 系统浏览器中的 SessionMap
@@ -140,23 +140,24 @@ Session 动作使用确定的降级阶梯。持久 handle 和 PID 只作为候�
 ## 本地网页与服务
 
 系统浏览器是唯一产品界面。Bun 服务同时负责 transcript watcher、状态写入、vendored
-Web 资产和受 capability 保护的 API；服务端读取投影提供主题、稳定 session 目录、
-有界 session 脉络与主题全貌结构，浏览器只持有当前 tab 凭据以及滚动、披露和局部相机
-等读取状态，不保存第二份业务状态。默认目录使用页面纵向滚动；二维平移缩放只属于
+Web 资产和受回环同源边界保护的 API；服务端读取投影提供主题、稳定 session 目录、
+有界 session 脉络与主题全貌结构，浏览器只持有滚动、披露和局部相机等读取偏好，不保存
+第二份业务状态。任意本机浏览器或新 profile 直接打开固定地址都读取同一份真实 snapshot。
+默认目录使用页面纵向滚动；二维平移缩放只属于
 按需展开的主题全貌，不能成为寻找 session 的旁路导航机制。
 
 服务可由 `sessionmap serve` 前台运行，也可用 standalone CLI 的 `sessionmap install`
-安装为当前用户的 launchd 服务。`sessionmap open` 负责打开授权页面。Terminal、iTerm
+安装为当前用户的 launchd 服务。`sessionmap open` 负责打开页面并确认首帧。Terminal、iTerm
 和 Orca 仍是跳转/恢复适配层，但不构成原生 SessionMap 客户端。
 
 ## 本地安全边界
 
-服务只绑定 `127.0.0.1`。根页面不包含 capability token。CLI 用状态目录中的私有
-capability 签发 30 秒 HMAC open ticket，只把 ticket 放入 URL fragment；页面立即清除
-fragment，通过同源 POST 一次性兑换当前 tab capability。服务记录本次 open id，页面
-完成首次 snapshot 与地图渲染后发送 ready，CLI 轮询到 ready 才报告成功。这样
-LaunchServices 的“已投递”不会再被误判为“用户已看到”。除 ticket 兑换入口外，所有
-`/api/*` 都要求长期 capability；ticket 不能替代普通 API 鉴权。状态变更请求还必须满足：
+服务只绑定 `127.0.0.1`，并把同一操作系统用户视为默认信任边界。根页面与
+`/api/snapshot` 对回环浏览器直接可读，不建立 tab capability，也不发送 CORS 许可。
+CLI 用状态目录中的私有签名密钥签发 30 秒 HMAC open ticket，只把 ticket 放入 URL
+fragment；页面立即清除 fragment，通过同源 POST 登记 open id，完成首次 snapshot 与地图
+渲染后发送 ready，CLI 轮询到 ready 才报告成功。这样 LaunchServices 的“已投递”不会再
+被误判为“用户已看到”，同时 `sessionmap open` 不成为数据访问前置条件。状态变更请求必须满足：
 
 Web 资产采用完整 bundle 内容版本。HTML、脚本、样式、vendor 和 CSS 图标引用共享该
 版本；只有 URL 版本与当前 bundle 匹配时才返回 immutable，固定旧 URL 一律 no-store。
@@ -168,6 +169,9 @@ Web 资产采用完整 bundle 内容版本。HTML、脚本、样式、vendor 和
 - body 是 JSON object。
 
 模型标签、session 标题、git 字段都按不可信文本处理，先做 HTML escape，再实体化 Markdown 元字符，阻断 HTML 标签和 `x](javascript:...)` 两类注入。静态资源通过 realpath + 目录边界检查。Transcript 文件从不以写模式打开。
+
+本机回环信任边界、备选方案与回滚见
+[ADR 0003](decisions/0003-loopback-browser-trust.md)。
 
 ## 升级迁移
 

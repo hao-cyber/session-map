@@ -527,7 +527,7 @@ describe("action safety and Orca matching", () => {
 });
 
 describe("local HTTP security boundary", () => {
-  test("creates and reuses a 0600 capability token", () => {
+  test("creates and reuses a 0600 open-handshake secret", () => {
     const root = directory();
     const first = ensureCapabilityToken(root);
     const second = ensureCapabilityToken(root);
@@ -546,22 +546,21 @@ describe("local HTTP security boundary", () => {
     expect(validJsonMediaType("text/plain")).toBeFalse();
   });
 
-  test("requires the capability token on every API read", async () => {
-    const { server, token } = await runningServer();
-    expect((await fetch(`${server.url}/api/snapshot`)).status).toBe(401);
-    const response = await fetch(`${server.url}/api/snapshot`, { headers: { "X-SessionMap-Token": token } });
+  test("lets any local browser read the same snapshot without tab credentials", async () => {
+    const { server } = await runningServer();
+    const response = await fetch(`${server.url}/api/snapshot`);
     expect(response.status).toBe(200);
     expect((await response.json()).markdown).toContain("SessionMap");
   });
 
-  test("exposes only a minimal unauthenticated loopback health check", async () => {
+  test("exposes a minimal loopback health check", async () => {
     const { server } = await runningServer();
     const response = await fetch(`${server.url}/health`);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, name: "SessionMap" });
   });
 
-  test("keeps the capability out of the public root and uses a one-time open ticket", async () => {
+  test("keeps the handshake secret out of the public root and uses a one-time open ticket", async () => {
     const { server, token } = await runningServer();
     const root = await fetch(server.url);
     const html = await root.text();
@@ -607,7 +606,7 @@ describe("local HTTP security boundary", () => {
       body: JSON.stringify({ ticket: openTicket.ticket }),
     });
     expect(exchanged.status).toBe(200);
-    expect(await exchanged.json()).toEqual({ token, openId: openTicket.id, expiresAt: openTicket.expiresAt });
+    expect(await exchanged.json()).toEqual({ openId: openTicket.id, expiresAt: openTicket.expiresAt });
     expect((await fetch(`${server.url}/api/open/exchange`, {
       method: "POST",
       headers: exchangeHeaders,
@@ -616,7 +615,7 @@ describe("local HTTP security boundary", () => {
 
     const ready = await fetch(`${server.url}/api/open/ready`, {
       method: "POST",
-      headers: { "X-SessionMap-Token": token, Origin: server.url, "Content-Type": "application/json" },
+      headers: { Origin: server.url, "Content-Type": "application/json" },
       body: JSON.stringify({ openId: openTicket.id }),
     });
     expect(ready.status).toBe(200);
@@ -637,20 +636,27 @@ describe("local HTTP security boundary", () => {
     })).status).toBe(403);
   });
 
-  test("rejects evil origins, wrong media types, and non-object JSON", async () => {
+  test("keeps the CLI open-status endpoint protected by the handshake secret", async () => {
     const { server, token } = await runningServer();
-    const headers = { "X-SessionMap-Token": token };
-    const evil = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { ...headers, Origin: "http://evil.example", "Content-Type": "application/json" }, body: "{}" });
+    const openTicket = createOpenTicket(token);
+    expect((await fetch(`${server.url}/api/open/status`, {
+      headers: { "X-SessionMap-Open-Ticket": openTicket.ticket },
+    })).status).toBe(401);
+  });
+
+  test("rejects evil origins, wrong media types, and non-object JSON", async () => {
+    const { server } = await runningServer();
+    const evil = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { Origin: "http://evil.example", "Content-Type": "application/json" }, body: "{}" });
     expect(evil.status).toBe(403);
-    const wrongType = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { ...headers, Origin: server.url, "Content-Type": "text/plain" }, body: "{}" });
+    const wrongType = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { Origin: server.url, "Content-Type": "text/plain" }, body: "{}" });
     expect(wrongType.status).toBe(415);
-    const array = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { ...headers, Origin: server.url, "Content-Type": "application/json" }, body: "[]" });
+    const array = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { Origin: server.url, "Content-Type": "application/json" }, body: "[]" });
     expect(array.status).toBe(400);
   });
 
-  test("archives and restores through an authorized click-equivalent POST", async () => {
+  test("archives and restores through a same-origin local click-equivalent POST", async () => {
     const fixture = await runningServer(true);
-    const headers = { "X-SessionMap-Token": fixture.token, Origin: fixture.server.url, "Content-Type": "application/json" };
+    const headers = { Origin: fixture.server.url, "Content-Type": "application/json" };
     const archived = await fetch(`${fixture.server.url}/api/archive`, { method: "POST", headers, body: JSON.stringify({ rootId: fixture.rootId }) });
     expect(archived.status).toBe(200);
     expect(fixture.store.snapshot().archived).toContain(fixture.rootId);

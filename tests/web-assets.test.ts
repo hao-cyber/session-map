@@ -85,7 +85,7 @@ describe("offline browser bundle", () => {
     expect(css).toContain(".now-mainline");
   });
 
-  test("bootstraps a one-time open ticket and gives expired credentials a recovery action", () => {
+  test("opens directly in any local browser and uses tickets only for CLI ready acknowledgement", () => {
     const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
     const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
     const cli = readFileSync(resolve(root, "src", "cli.ts"), "utf8");
@@ -97,9 +97,11 @@ describe("offline browser bundle", () => {
     expect(app).toContain("clearOpenHandshake()");
     expect(app).toContain("const hasPendingExchange = window.SESSIONMAP_OPEN_TICKET");
     expect(app).toContain("if (hasPendingExchange) await exchangeOpenTicket()");
-    expect(app).toContain('headers.set("X-SessionMap-Token"');
+    expect(app).not.toContain('headers.set("X-SessionMap-Token"');
+    expect(app).not.toContain("SESSIONMAP_TOKEN");
+    expect(html).not.toContain("sessionmap.capability.v1");
     expect(app).not.toContain("x-maintrail-token");
-    expect(app).toContain("访问凭据已失效 · 请重新运行 sessionmap open");
+    expect(app).toContain("打开回执已失效 · 正在直接读取本机数据");
     expect(cli).toContain("--browser APP");
   });
 

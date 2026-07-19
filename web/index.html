@@ -9,7 +9,6 @@
     <link rel="stylesheet" href="/assets/styles.css?v=__SESSIONMAP_ASSET_VERSION__" />
     <script nonce="__SESSIONMAP_NONCE__">
       (() => {
-        const capabilityKey = "sessionmap.capability.v1";
         const openTicketKey = "sessionmap.open-ticket.v1";
         const openIdKey = "sessionmap.open-id.v1";
         const openExpiryKey = "sessionmap.open-expiry.v1";
@@ -23,7 +22,6 @@
           const rest = fragment.toString();
           history.replaceState(null, "", `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`);
         }
-        window.SESSIONMAP_TOKEN = sessionStorage.getItem(capabilityKey) || "";
         window.SESSIONMAP_OPEN_TICKET = sessionStorage.getItem(openTicketKey) || "";
         window.SESSIONMAP_OPEN_ID = sessionStorage.getItem(openIdKey) || "";
         window.SESSIONMAP_OPEN_EXPIRY = Number(sessionStorage.getItem(openExpiryKey) || "0");

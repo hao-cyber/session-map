@@ -4,7 +4,6 @@
   const POLL_MS = 4_000;
   const DRAG_THRESHOLD = 5;
   const SESSION_CLICK_DELAY_MS = 350;
-  const capabilityKey = "sessionmap.capability.v1";
   const openTicketKey = "sessionmap.open-ticket.v1";
   const openIdKey = "sessionmap.open-id.v1";
   const openExpiryKey = "sessionmap.open-expiry.v1";
@@ -74,7 +73,6 @@
 
   async function api(path, init = {}) {
     const headers = new Headers(init.headers || {});
-    headers.set("X-SessionMap-Token", window.SESSIONMAP_TOKEN);
     if (init.body !== undefined) headers.set("Content-Type", "application/json");
     const response = await fetch(path, {
       cache: "no-store",
@@ -110,15 +108,12 @@
       error.status = response.status;
       throw error;
     }
-    if (!/^[A-Za-z0-9_-]{43,128}$/.test(payload?.token || "") ||
-        !/^[A-Za-z0-9_-]{24}$/.test(payload?.openId || "") ||
+    if (!/^[A-Za-z0-9_-]{24}$/.test(payload?.openId || "") ||
         !Number.isSafeInteger(payload?.expiresAt)) {
-      throw new Error("本地服务返回了无效的打开凭据");
+      throw new Error("本地服务返回了无效的打开回执");
     }
-    window.SESSIONMAP_TOKEN = payload.token;
     window.SESSIONMAP_OPEN_ID = payload.openId;
     window.SESSIONMAP_OPEN_EXPIRY = payload.expiresAt;
-    sessionStorage.setItem(capabilityKey, payload.token);
     sessionStorage.setItem(openIdKey, payload.openId);
     sessionStorage.setItem(openExpiryKey, String(payload.expiresAt));
   }
@@ -891,7 +886,7 @@
   });
 
   async function poll(force = false) {
-    if (polling || !window.SESSIONMAP_TOKEN) return false;
+    if (polling) return false;
     polling = true;
     try {
       const next = await api("/api/snapshot");
@@ -916,14 +911,6 @@
       await acknowledgeOpen();
       return true;
     } catch (error) {
-      if (error?.status === 401) {
-        sessionStorage.removeItem(capabilityKey);
-        window.SESSIONMAP_TOKEN = "";
-        clearOpenHandshake();
-        statusLine.textContent = "访问凭据已失效 · 请重新运行 sessionmap open";
-        loading.querySelector("span:last-child").textContent = "重新授权后会回到同一棵思维树";
-        return false;
-      }
       statusLine.textContent = `暂时无法刷新 · ${error.message || error}`;
       // Keep the last successful tree and revision. The next poll retries it.
       if (seenRevision < 0) loading.querySelector("span:last-child").textContent = "等待本地服务恢复";
@@ -936,20 +923,12 @@
   async function boot() {
     try {
       const hasPendingExchange = window.SESSIONMAP_OPEN_TICKET &&
-        (!window.SESSIONMAP_TOKEN || !window.SESSIONMAP_OPEN_ID ||
-          Date.now() > Number(window.SESSIONMAP_OPEN_EXPIRY || 0));
+        (!window.SESSIONMAP_OPEN_ID || Date.now() > Number(window.SESSIONMAP_OPEN_EXPIRY || 0));
       if (hasPendingExchange) await exchangeOpenTicket();
     } catch (error) {
-      sessionStorage.removeItem(openTicketKey);
-      window.SESSIONMAP_OPEN_TICKET = "";
-      statusLine.textContent = "打开凭据已失效 · 请重新运行 sessionmap open";
+      clearOpenHandshake();
+      statusLine.textContent = "打开回执已失效 · 正在直接读取本机数据";
       loading.querySelector("span:last-child").textContent = error.message || String(error);
-      return;
-    }
-    if (!window.SESSIONMAP_TOKEN) {
-      statusLine.textContent = "请运行 sessionmap open 安全打开本地页面";
-      loading.querySelector("span:last-child").textContent = "此页面没有本地访问凭据";
-      return;
     }
     if (!window.d3 || !window.markmap?.Transformer || !window.markmap?.Markmap) {
       throw new Error("本地 markmap 资产未加载");
