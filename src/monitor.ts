@@ -7,6 +7,7 @@ import { matchOrcaSession, readOrcaSnapshot } from "./orca.ts";
 import { StateStore } from "./state.ts";
 import type { GitChip, SessionRecord, SessionStatus } from "./types.ts";
 import { isRecord, safeJsonParse, truncateBytes } from "./utils.ts";
+import { providerExecutableMatches, providerIdentityForPath, providerProcessNames } from "./providers.ts";
 
 type ClaudeAgent = {
   id: string;
@@ -83,14 +84,7 @@ async function readProcesses(): Promise<ProcessRow[]> {
 }
 
 function transcriptIdentity(path: string): Pick<TranscriptProcessRow, "provider" | "sessionId"> | null {
-  if (!path.endsWith(".jsonl")) return null;
-  const codex = path.match(/\/sessions\/\d{4}\/\d{2}\/\d{2}\/rollout-.+?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
-  if (codex?.[1]) return { provider: "codex", sessionId: codex[1] };
-  if (!path.includes("/.claude/projects/")) return null;
-  const name = basename(path, ".jsonl");
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)
-    ? { provider: "claude", sessionId: name }
-    : null;
+  return providerIdentityForPath(path);
 }
 
 /** Parse one macOS lsof -Fpn stream into exact transcript-to-process links. */
@@ -148,10 +142,9 @@ async function readTranscriptProcesses(run: TextRunner = runText): Promise<Trans
   // lsof exits 1 when any combined -c selector has no match, even if another
   // selector produced complete valid output. Query providers independently so
   // a machine running only Codex or only Claude does not look fully closed.
-  const results = await Promise.all([
-    run([lsof, "-n", "-P", "-Fpn", "-c", "codex"], 5_000),
-    run([lsof, "-n", "-P", "-Fpn", "-c", "claude"], 5_000),
-  ]);
+  const results = await Promise.all(providerProcessNames().map((provider) =>
+    run([lsof, "-n", "-P", "-Fpn", "-c", provider], 5_000)
+  ));
   return results.flatMap((result) => result.ok ? parseLsofTranscriptProcesses(result.text) : []);
 }
 
@@ -174,8 +167,7 @@ export function processForSession(session: SessionRecord, rows: ProcessRow[]): P
   return rows.find((row) => {
     const args = row.command.split(/\s+/).filter(Boolean);
     const executable = args.findIndex((arg) => {
-      const name = basename(unquoteArg(arg));
-      return name === session.provider || name === `${session.provider}.js` || name.startsWith(`${session.provider}-`);
+      return providerExecutableMatches(session.provider, unquoteArg(arg));
     });
     if (executable < 0) return false;
     if (session.provider === "codex") {
@@ -185,7 +177,8 @@ export function processForSession(session: SessionRecord, rows: ProcessRow[]): P
     }
     return args.slice(executable + 1).some((arg, index, tail) => {
       if (arg === `--resume=${session.id}`) return true;
-      return ["--resume", "-r"].includes(arg) && unquoteArg(tail[index + 1] ?? "") === session.id;
+      if (session.provider === "kimi" && arg === `--session=${session.id}`) return true;
+      return ["--resume", "--session", "-r", "-S"].includes(arg) && unquoteArg(tail[index + 1] ?? "") === session.id;
     });
   });
 }

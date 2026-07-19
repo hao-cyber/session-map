@@ -2,8 +2,9 @@
 
 ## 职责
 
-把每个 session 的实时运行状态和可靠动作暴露给读取层：运行时切换到原终端，关闭后
-恢复会话。Orca 可提升体验，但缺失时仍必须正常工作。
+把每个 session 的实时运行状态和可靠动作暴露给读取层：运行时快速切换到原终端，关闭后
+用原 provider 协议恢复会话。切换与恢复是 SessionMap 的核心功能；Orca 可提升体验，
+但缺失时仍必须正常工作。
 
 ## 代码入口
 
@@ -17,6 +18,8 @@
 - Session 的双击以及行尾“回到终端/恢复”按钮必须真实切换或恢复，不能用无动作的视觉
   反馈冒充成功；单击专用于展开或折叠脉络。
 - 每次动作前重新验证进程身份；不得信任持久化的陈旧 PID。
+- 快速路径命中已知 Orca handle 或 PID 时只做一次现场验证，不先扫描全部 provider；
+  快速路径失效后才并行刷新 Orca、打开 source 与进程证据，避免串行叠加点击延迟。
 - 初始进程没有 session ID 时，只用其只读打开的 transcript 建立精确关联；Codex 与
   Claude 的 `lsof -c` 必须分别查询再合并，不能让一个 provider 无进程时的退出码
   抹掉另一个 provider 的有效证据。
@@ -24,6 +27,11 @@
   单进程 `lsof` 现场核对 provider + session transcript，失败后才并行刷新全量证据。
 - 模糊匹配必须同时满足 provider、cwd 且结果唯一；歧义时停止，不切错终端。
 - 降级顺序是精确 Orca → 精确系统 TTY → 安全的新终端恢复。
+- 新终端恢复必须由 provider registry 生成原生命令，并保留原 session ID、cwd 与必要的
+  provider home：Claude `claude --resume`、Codex `codex resume`、Kimi `kimi --session`、
+  Grok `grok --resume`、社区 MiniMax CLI `minimax --resume`。
+- 没有完整 cwd、合法 session ID 或已知恢复协议时，入口必须返回明确错误；不得退化为
+  新建普通 CLI、猜 cwd、模糊匹配相似 session 或显示虚假成功。
 - 页面与服务端动作入口必须对同一 session 的在途跳转去重，避免跨 tab 或双击明确按钮
   触发两次恢复。
 - 测试关闭检测时只操作专用测试终端，绝不关闭用户其他终端。

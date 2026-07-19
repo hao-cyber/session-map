@@ -10,6 +10,7 @@ import {
 import { StateStore } from "./state.ts";
 import type { SessionRecord } from "./types.ts";
 import { controlSafe, isRecord, truncateChars } from "./utils.ts";
+import { providerHomeForSource, providerResumeArgs } from "./providers.ts";
 
 export interface ActionResult {
   ok: boolean;
@@ -40,24 +41,18 @@ export function shellQuote(value: string): string {
 }
 
 export function codexHomeForTranscript(path: string): string | null {
-  const safePath = controlSafe(path);
-  const marker = "/sessions/";
-  const index = safePath.lastIndexOf(marker);
-  if (!safePath.startsWith("/") || index <= 0) return null;
-  return safePath.slice(0, index);
+  return providerHomeForSource({ provider: "codex", path })?.value ?? null;
 }
 
 export function resumeCommand(session: SessionRecord): string {
   if (!validSessionId(session.id)) throw new Error("invalid session id");
   const cwd = controlSafe(session.cwd);
   if (!cwd || !existsSync(cwd)) throw new Error("session cwd no longer exists");
-  const codexHome = session.provider === "codex" ? codexHomeForTranscript(session.path) : null;
-  const executable = session.provider === "claude"
-    ? "claude --resume"
-    : codexHome
-      ? `env CODEX_HOME=${shellQuote(codexHome)} codex resume -c check_for_update_on_startup=false`
-      : "codex resume -c check_for_update_on_startup=false";
-  return `cd ${shellQuote(cwd)} && ${executable} ${shellQuote(session.id)}`;
+  const [executable, ...rawArgs] = providerResumeArgs(session.provider, session.id);
+  const args = rawArgs.map((arg) => arg === session.id ? shellQuote(arg) : arg).join(" ");
+  const home = providerHomeForSource(session);
+  const environment = home ? `env ${home.name}=${shellQuote(home.value)} ` : "";
+  return `cd ${shellQuote(cwd)} && ${environment}${executable} ${args}`;
 }
 
 async function ttyForPid(pid: number, textRunner: ActionDependencies["runText"]): Promise<string | null> {

@@ -28,3 +28,6 @@ SessionMap 会读取本机 AI coding agent transcript，并能在用户显式操
 - 模型 op 必须通过 schema、主线子树授权和 reattach 写边界。
 - 跳转、复活、发话只允许来自本机页面的显式交互。
 - Web runtime 不包含 CDN、遥测或外部数据上报。
+- macOS App 只允许 WKWebView 导航到固定回环 origin，不注入 JavaScript bridge，不读取
+  `state.json` 或签名密钥；外部链接交给系统浏览器。App 只通过统一 CLI install 事务恢复
+  后台服务。

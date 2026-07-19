@@ -16,6 +16,7 @@
 - session 关联、终端状态、切换与恢复：[`docs/modules/session-navigation.md`](docs/modules/session-navigation.md)
 - 主题 → session → 脉络的 Web 读取层：[`docs/modules/web-ui.md`](docs/modules/web-ui.md)
 - 本地 Web 服务、浏览器入口与 launchd：[`docs/modules/local-runtime.md`](docs/modules/local-runtime.md)
+- 安装式 Web App、macOS 极薄壳与桌面召回：[`docs/modules/desktop-host.md`](docs/modules/desktop-host.md)
 - 旧状态迁移、standalone CLI 与发布：[`docs/modules/migration-release.md`](docs/modules/migration-release.md)
 
 先按改动范围读取对应模块文档；跨模块改动同时读取所有受影响文档。模块文档解释
@@ -73,7 +74,8 @@
 
 ## 工作约定
 
-- TypeScript 核心、Web UI 与构建工具统一使用 Bun；不要引入原生壳或 Electron。
+- TypeScript 核心、Web UI 与构建工具统一使用 Bun；macOS 极薄壳只能承载同一地图文档，
+  不得拥有业务状态或 IPC。不要引入 Electron。
 - 逻辑改动运行 `bun run check`；发布改动还必须构建 standalone CLI 并做安装冒烟。
 - UI 改动必须生成代表性桌面尺寸的真实截图，检查层级、对比度、溢出、命中区、
   交互反馈和模板感。

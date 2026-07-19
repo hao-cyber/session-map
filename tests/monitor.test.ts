@@ -64,10 +64,18 @@ describe("session monitor state merge", () => {
       "n/Users/example/.claude/projects/-Users-example-Code/22222222-2222-4222-8222-222222222222.jsonl",
       "p50000",
       "n/Users/example/random.jsonl",
+      "p60000",
+      "n/dev/ttys008",
+      "n/Users/example/.kimi/sessions/hash/kimi-session/context.jsonl",
+      "p70000",
+      "n/dev/ttys009",
+      "n/Users/example/.grok/sessions/cwd/grok-session/updates.jsonl",
     ].join("\n");
     expect(parseLsofTranscriptProcesses(output)).toEqual([
       { pid: 30538, tty: "/dev/ttys000", command: "open transcript", provider: "codex", sessionId: "11111111-1111-4111-8111-111111111111" },
       { pid: 41200, tty: "/dev/ttys004", command: "open transcript", provider: "claude", sessionId: "22222222-2222-4222-8222-222222222222" },
+      { pid: 60000, tty: "/dev/ttys008", command: "open transcript", provider: "kimi", sessionId: "kimi-session" },
+      { pid: 70000, tty: "/dev/ttys009", command: "open transcript", provider: "grok", sessionId: "grok-session" },
     ]);
   });
 
@@ -85,7 +93,7 @@ describe("session monitor state merge", () => {
         : { ok: false, text: "" };
     });
 
-    expect(calls.map((command) => command.at(-1))).toEqual(["codex", "claude"]);
+    expect(calls.map((command) => command.at(-1))).toEqual(["codex", "claude", "kimi", "grok", "minimax"]);
     expect(rows).toEqual([{
       pid: 33593,
       tty: "/dev/ttys000",

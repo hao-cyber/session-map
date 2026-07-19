@@ -1,4 +1,3 @@
-import { readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -24,11 +23,15 @@ import type {
   TranscriptMeta,
 } from "./types.ts";
 import { nowIso, sleep } from "./utils.ts";
+import { discoverProviderSources, type ProviderSource, type SourceKind } from "./providers.ts";
 
 export interface TranscriptFile {
   path: string;
   provider: Provider;
   sessionId?: string;
+  kind?: SourceKind;
+  cwd?: string;
+  title?: string;
   size: number;
   mtimeMs: number;
 }
@@ -41,39 +44,6 @@ export type RollFunction = (
 
 type Pending = { firstSeen: number; latestSize: number };
 
-function filesAt(root: string, provider: Provider, depth: number): TranscriptFile[] {
-  const result: TranscriptFile[] = [];
-  const visit = (directory: string, remaining: number): void => {
-    let entries;
-    try {
-      entries = readdirSync(directory, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const entry of entries) {
-      const path = join(directory, entry.name);
-      if (entry.isDirectory() && remaining > 0) {
-        visit(path, remaining - 1);
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-      if (provider === "codex" && !entry.name.startsWith("rollout-")) continue;
-      try {
-        const stat = statSync(path);
-        result.push({
-          path,
-          provider,
-          sessionId: sessionIdFromPath(path, provider),
-          size: stat.size,
-          mtimeMs: stat.mtimeMs,
-        });
-      } catch {}
-    }
-  };
-  visit(root, depth);
-  return result;
-}
-
 export function discoverTranscripts(
   home = homedir(),
   additionalCodexHomes: string[] = [
@@ -81,14 +51,7 @@ export function discoverTranscripts(
     join(home, "Library", "Application Support", "orca", "codex-runtime-home", "home"),
   ],
 ): TranscriptFile[] {
-  const codexHomes = new Set([
-    join(home, ".codex"),
-    ...additionalCodexHomes,
-  ].filter(Boolean));
-  const files = [
-    ...filesAt(join(home, ".claude", "projects"), "claude", 1),
-    ...[...codexHomes].flatMap((codexHome) => filesAt(join(codexHome, "sessions"), "codex", 4)),
-  ];
+  const files: ProviderSource[] = discoverProviderSources(home, additionalCodexHomes);
   files.sort((left, right) => right.mtimeMs - left.mtimeMs || right.size - left.size);
   const logicalSessions = new Map<string, TranscriptFile>();
   for (const file of files) {
@@ -180,7 +143,10 @@ export class TranscriptWatcher {
     for (const source of this.discover()) {
       const stored = storedOffset(state, source);
       if (stored?.ignored) continue;
-      const offset = stored && stored.offset <= source.size ? stored.offset : 0;
+      const snapshotChanged = source.kind === "snapshot" && stored?.mtimeMs !== source.mtimeMs;
+      const offset = source.kind === "snapshot"
+        ? (snapshotChanged ? 0 : source.size)
+        : stored && stored.offset <= source.size ? stored.offset : 0;
       const available = source.size - offset;
       if (available <= 0) {
         this.#pending.delete(source.path);
@@ -190,7 +156,7 @@ export class TranscriptWatcher {
       pending.latestSize = source.size;
       this.#pending.set(source.path, pending);
       const cooldownUntil = stored?.cooldownUntil ?? 0;
-      const ready = force || available >= LINGER_BYTES || now - pending.firstSeen >= LINGER_MS;
+      const ready = force || source.kind === "snapshot" || available >= LINGER_BYTES || now - pending.firstSeen >= LINGER_MS;
       if (ready && (force || now >= cooldownUntil)) this.#enqueue(source);
     }
   }
@@ -227,7 +193,9 @@ export class TranscriptWatcher {
   async #process(source: TranscriptFile): Promise<void> {
     const before = this.store.snapshot();
     const offset = storedOffset(before, source);
-    const initialOffset = offset && offset.offset <= source.size
+    const initialOffset = source.kind === "snapshot"
+      ? 0
+      : offset && offset.offset <= source.size
       ? offset.offset
       : source.size > MAX_READ_BYTES
         ? source.size - MAX_READ_BYTES
@@ -235,6 +203,10 @@ export class TranscriptWatcher {
     const delta = readTranscriptDelta(source.path, source.provider, {
       offset: initialOffset,
       mtimeMs: source.mtimeMs,
+      kind: source.kind ?? "append",
+      ...(source.sessionId ? { sessionId: source.sessionId } : {}),
+      ...(source.cwd ? { cwd: source.cwd } : {}),
+      ...(source.title ? { title: source.title } : {}),
       ...(offset?.skipUntilNewline && initialOffset > 0 ? { skipUntilNewline: true } : {}),
     });
     if (delta.nextOffset <= initialOffset && delta.bytesRead > 0) return;

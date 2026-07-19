@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { statSync } from "node:fs";
+import { statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { StateStore } from "../src/state.ts";
 import { TreeRuntime } from "../src/tree.ts";
 import type { RollOutput, TranscriptMeta } from "../src/types.ts";
@@ -28,6 +29,26 @@ describe("watcher delivery semantics", () => {
     const files = discoverTranscripts(root, [codexHome]);
     expect(files.map((file) => file.path)).toContain(path);
     expect(files.find((file) => file.path === path)?.provider).toBe("codex");
+  });
+
+  test("discovers Kimi, Grok, and MiniMax sources with recoverable metadata", () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const kimiCwd = "/work/kimi";
+    const kimiHash = createHash("md5").update(kimiCwd).digest("hex");
+    const kimi = join(root, ".kimi", "sessions", kimiHash, "kimi-id", "context.jsonl");
+    writeJsonLines(kimi, [{ role: "user", content: "Kimi" }]);
+    writeFileSync(join(root, ".kimi", "kimi.json"), JSON.stringify({ work_dirs: [{ path: kimiCwd, kaos: "local" }] }));
+    const grok = join(root, ".grok", "sessions", "%2Fwork%2Fgrok", "grok-id", "updates.jsonl");
+    writeJsonLines(grok, [{ method: "session/update", params: { sessionId: "grok-id", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "Grok" } } } }]);
+    writeFileSync(join(root, ".grok", "sessions", "%2Fwork%2Fgrok", "grok-id", "summary.json"), JSON.stringify({ info: { id: "grok-id", cwd: "/work/grok" }, generated_title: "Grok title" }));
+    const minimax = join(root, ".minimax", "sessions", "minimax-id.json");
+    writeJsonLines(minimax, [{ metadata: { id: "minimax-id", workspace: "/work/minimax", title: "MiniMax title" }, messages: [] }]);
+
+    const files = discoverTranscripts(root, []);
+    expect(files.find((file) => file.provider === "kimi")).toMatchObject({ path: kimi, cwd: "/work/kimi", kind: "append" });
+    expect(files.find((file) => file.provider === "grok")).toMatchObject({ path: grok, cwd: "/work/grok", title: "Grok title", kind: "append" });
+    expect(files.find((file) => file.provider === "minimax")).toMatchObject({ path: minimax, cwd: "/work/minimax", title: "MiniMax title", kind: "snapshot" });
   });
 
   test("deduplicates mirrored Codex homes by logical session id", () => {
@@ -85,6 +106,35 @@ describe("watcher delivery semantics", () => {
     expect(store.snapshot().offsets[secondPath]?.offset).toBe(statSync(secondPath).size);
     const rootId = store.snapshot().roots[0]!;
     expect(store.snapshot().nodes[rootId]?.children).toHaveLength(2);
+  });
+
+  test("consumes rewritten snapshot sources once per mtime version", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const path = join(root, "minimax-id.json");
+    const writeSnapshot = (text: string): void => writeFileSync(path, JSON.stringify({
+      metadata: { id: "minimax-id", workspace: root, title: "MiniMax" },
+      messages: [{ role: "user", content: [{ type: "text", text }] }],
+    }));
+    writeSnapshot("first");
+    const source = (): TranscriptFile[] => {
+      const stat = statSync(path);
+      return [{ path, provider: "minimax", kind: "snapshot", sessionId: "minimax-id", cwd: root, size: stat.size, mtimeMs: stat.mtimeMs }];
+    };
+    const store = new StateStore(join(root, "state"));
+    let calls = 0;
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async () => {
+      calls += 1;
+      return { mainline: "MiniMax", ask: { kind: "none", hint: "" }, ops: [] };
+    }, source);
+    await watcher.once();
+    await watcher.once();
+    expect(calls).toBe(1);
+    writeSnapshot("second");
+    const future = new Date(Date.now() + 1_000);
+    utimesSync(path, future, future);
+    await watcher.once();
+    expect(calls).toBe(2);
   });
 
   test("commits the byte offset before applying non-idempotent grow", async () => {

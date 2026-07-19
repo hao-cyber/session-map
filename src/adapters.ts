@@ -1,5 +1,5 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, dirname } from "node:path";
 import {
   GIANT_LINE_BYTES,
   LEGACY_ROLL_SENTINELS,
@@ -8,6 +8,7 @@ import {
   ROLL_SENTINEL,
 } from "./constants.ts";
 import type { FilteredDelta, Provider } from "./types.ts";
+import { providerForPath as registeredProviderForPath, providerIdentityForPath, type SourceKind } from "./providers.ts";
 import {
   byteLength,
   controlSafe,
@@ -21,6 +22,10 @@ export interface ReadDeltaOptions {
   offset?: number;
   skipUntilNewline?: boolean;
   mtimeMs?: number;
+  kind?: SourceKind;
+  sessionId?: string;
+  cwd?: string;
+  title?: string;
 }
 
 type Collected = {
@@ -157,6 +162,78 @@ function collectCodex(row: Record<string, unknown>, result: Collected): void {
   }
 }
 
+function contentTexts(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (isRecord(content) && ["text", "input_text", "output_text"].includes(String(content.type)) && typeof content.text === "string") {
+    return [content.text];
+  }
+  if (!Array.isArray(content)) return [];
+  const result: string[] = [];
+  for (const block of content) {
+    if (typeof block === "string") result.push(block);
+    else if (isRecord(block) && ["text", "input_text", "output_text"].includes(String(block.type)) && typeof block.text === "string") {
+      result.push(block.text);
+    }
+  }
+  return result;
+}
+
+function collectKimi(row: Record<string, unknown>, result: Collected): void {
+  const role = typeof row.role === "string" ? row.role : "";
+  if (role === "user") {
+    for (const text of contentTexts(row.content)) collectText(result.users, text, result, true);
+  } else if (role === "assistant") {
+    for (const text of contentTexts(row.content)) collectText(result.assistants, text, result);
+  }
+  if (Array.isArray(row.content)) {
+    for (const block of row.content) {
+      if (!isRecord(block)) continue;
+      if (["tool_use", "function_call"].includes(String(block.type)) && typeof block.name === "string") {
+        result.tools.push(block.name);
+      } else if (block.type === "tool_result" && (block.is_error === true || block.status === "failed")) {
+        result.errors.push("tool_result:error");
+      }
+    }
+  }
+}
+
+function collectGrok(row: Record<string, unknown>, result: Collected): void {
+  const params = isRecord(row.params) ? row.params : {};
+  if (typeof params.sessionId === "string" && params.sessionId) result.sessionId = params.sessionId;
+  const update = isRecord(params.update) ? params.update : {};
+  const type = String(update.sessionUpdate ?? "");
+  if (type === "user_message_chunk") {
+    for (const text of contentTexts(update.content)) collectText(result.users, text, result, true);
+  } else if (type === "agent_message_chunk") {
+    for (const text of contentTexts(update.content)) collectText(result.assistants, text, result);
+  } else if (type === "tool_call" && typeof update.title === "string") {
+    result.tools.push(update.title);
+  } else if (type === "tool_call_update" && ["failed", "error"].includes(String(update.status))) {
+    result.errors.push("tool_result:error");
+  }
+}
+
+function collectMinimax(saved: Record<string, unknown>, result: Collected): void {
+  const metadata = isRecord(saved.metadata) ? saved.metadata : {};
+  if (typeof metadata.id === "string" && metadata.id) result.sessionId = metadata.id;
+  if (typeof metadata.workspace === "string" && metadata.workspace) result.cwd = metadata.workspace;
+  const messages = Array.isArray(saved.messages) ? saved.messages : [];
+  for (const message of messages) {
+    if (!isRecord(message)) continue;
+    const role = typeof message.role === "string" ? message.role : "";
+    if (role === "user") {
+      for (const text of contentTexts(message.content)) collectText(result.users, text, result, true);
+    } else if (role === "assistant") {
+      for (const text of contentTexts(message.content)) collectText(result.assistants, text, result);
+    }
+    if (!Array.isArray(message.content)) continue;
+    for (const block of message.content) {
+      if (!isRecord(block)) continue;
+      if (block.type === "tool_use" && typeof block.name === "string") result.tools.push(block.name);
+    }
+  }
+}
+
 function toolSummary(tools: string[]): string {
   if (!tools.length) return "";
   const order: string[] = [];
@@ -230,25 +307,72 @@ function collectLines(provider: Provider, bytes: Uint8Array, fallbackId: string)
       continue;
     }
     if (provider === "claude") collectClaude(row, result);
-    else collectCodex(row, result);
+    else if (provider === "codex") collectCodex(row, result);
+    else if (provider === "kimi") collectKimi(row, result);
+    else if (provider === "grok") collectGrok(row, result);
   }
   return result;
 }
 
 export function sessionIdFromPath(path: string, provider: Provider): string {
+  const identity = providerIdentityForPath(path);
+  if (identity?.provider === provider) return identity.sessionId;
   const stem = basename(path, ".jsonl");
   if (provider === "claude") return stem;
+  if (provider === "kimi" || provider === "grok") return basename(dirname(path));
+  if (provider === "minimax") return basename(path, ".json");
   const match = stem.match(/([0-9a-f]{8}-[0-9a-f-]{20,})$/i);
   return match?.[1] ?? stem;
 }
 
 export function providerForPath(path: string): Provider | null {
-  const normalized = path.replaceAll("\\", "/");
-  if (normalized.includes("/.claude/projects/") && normalized.endsWith(".jsonl")) return "claude";
-  if (normalized.includes("/sessions/") && basename(path).startsWith("rollout-") && normalized.endsWith(".jsonl")) {
-    return "codex";
+  return registeredProviderForPath(path);
+}
+
+function snapshotDelta(path: string, provider: Provider, options: ReadDeltaOptions): FilteredDelta {
+  const stat = statSync(path);
+  const fallbackId = options.sessionId || sessionIdFromPath(path, provider);
+  const baseMeta = {
+    provider,
+    sessionId: fallbackId,
+    path,
+    cwd: options.cwd ?? "",
+    title: options.title || `${provider}:${fallbackId.slice(0, 8)}`,
+    lastUser: "",
+    mtimeMs: options.mtimeMs ?? stat.mtimeMs,
+  };
+  if (stat.size > MAX_READ_BYTES) {
+    return { meta: baseMeta, text: "", nextOffset: stat.size, lowSignal: true, selfGenerated: false, skipUntilNewline: false, parseErrors: 1, bytesRead: 0 };
   }
-  return null;
+  const fd = openSync(path, "r");
+  const raw = Buffer.allocUnsafe(stat.size);
+  let bytesRead = 0;
+  try {
+    bytesRead = readSync(fd, raw, 0, stat.size, 0);
+  } finally {
+    closeSync(fd);
+  }
+  const collected: Collected = { users: [], assistants: [], tools: [], errors: [], sessionId: fallbackId, cwd: options.cwd ?? "", selfGenerated: false, parseErrors: 0 };
+  try {
+    const saved: unknown = JSON.parse(new TextDecoder().decode(raw.subarray(0, bytesRead)));
+    if (!isRecord(saved)) collected.parseErrors += 1;
+    else collectMinimax(saved, collected);
+  } catch {
+    collected.parseErrors += 1;
+  }
+  const lastUser = collected.users.at(-1) ?? "";
+  const title = options.title || truncateChars(normalizeText(lastUser.split(/\r?\n/, 1)[0]) || baseMeta.title, 100);
+  const text = buildBoundedDelta(collected);
+  return {
+    meta: { ...baseMeta, sessionId: collected.sessionId, cwd: collected.cwd || baseMeta.cwd, title, lastUser: truncateChars(lastUser, 2_000) },
+    text,
+    nextOffset: stat.size,
+    lowSignal: !text,
+    selfGenerated: collected.selfGenerated,
+    skipUntilNewline: false,
+    parseErrors: collected.parseErrors,
+    bytesRead,
+  };
 }
 
 export function readTranscriptDelta(
@@ -256,6 +380,7 @@ export function readTranscriptDelta(
   provider: Provider,
   options: ReadDeltaOptions = {},
 ): FilteredDelta {
+  if (options.kind === "snapshot") return snapshotDelta(path, provider, options);
   const stat = statSync(path);
   let offset = Math.max(0, Math.floor(options.offset ?? 0));
   if (offset > stat.size) offset = 0;
@@ -276,14 +401,14 @@ export function readTranscriptDelta(
   if (skipUntilNewline) {
     const newline = bytes.indexOf(10);
     if (newline < 0) {
-      const id = sessionIdFromPath(path, provider);
+      const id = options.sessionId || sessionIdFromPath(path, provider);
       return {
         meta: {
           provider,
           sessionId: id,
           path,
-          cwd: "",
-          title: `${provider}:${id.slice(0, 8)}`,
+          cwd: options.cwd ?? "",
+          title: options.title || `${provider}:${id.slice(0, 8)}`,
           lastUser: "",
           mtimeMs: options.mtimeMs ?? stat.mtimeMs,
         },
@@ -312,11 +437,12 @@ export function readTranscriptDelta(
     nextOffset = offset;
   }
   const complete = dataEnd >= dataStart ? bytes.subarray(dataStart, dataEnd + 1) : new Uint8Array();
-  const fallbackId = sessionIdFromPath(path, provider);
+  const fallbackId = options.sessionId || sessionIdFromPath(path, provider);
   const collected = collectLines(provider, complete, fallbackId);
+  if (!collected.cwd && options.cwd) collected.cwd = options.cwd;
   const lastUser = collected.users.at(-1) ?? "";
   const titleLine = lastUser.split(/\r?\n/, 1)[0] ?? "";
-  const title = truncateChars(normalizeText(titleLine) || `${provider}:${collected.sessionId.slice(0, 8)}`, 100);
+  const title = options.title || truncateChars(normalizeText(titleLine) || `${provider}:${collected.sessionId.slice(0, 8)}`, 100);
   const lowSignal = collected.users.length === 0 && collected.assistants.length === 0 && collected.errors.length === 0;
   return {
     meta: {

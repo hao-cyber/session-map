@@ -36,10 +36,10 @@ Runtime 拥有封闭边界：
 ## 组件关系
 
 ```text
-Claude / Codex transcript JSONL（只读、append-only）
+Claude / Codex / Kimi / Grok / MiniMax provider source（只读）
         │
-        ├─ watcher：发现文件变化、linger、冷却、60 session 上限
-        │
+        ├─ provider registry：发现、身份、格式、cwd 与恢复协议
+        ├─ watcher：发现文件变化、linger、冷却、60 个近期 session 上限
         ├─ adapter：提取结构信号，过滤 thinking 与工具结果正文
         │
         ▼
@@ -52,7 +52,8 @@ Tree runtime（唯一写者）
 state.json + open 回执签名密钥
         │
         ├─ loopback HTTP API / 本地静态资源
-        ├─ 系统浏览器中的 SessionMap
+        ├─ 浏览器 / installed Web App / macOS 极薄壳中的同一地图文档
+        ├─ sessionmap now 只读投影
         └─ Orca / iTerm2 / Terminal 动作层
 ```
 
@@ -101,9 +102,12 @@ Roll 故意采用 at-most-once：
 - 同一 session 至少冷却 45 秒；
 - 最多监控最近活跃的 60 个 transcript session。
 
-标准目录、环境变量目录与 Orca 管理的 Codex home 按 provider + session id 去重；同一 WAL 换路径时，逻辑 session 的持久 offset 会跟随它，避免重复生长。
+标准目录、provider 环境变量目录与 Orca 管理的 Codex home 按 provider + session id
+去重；同一 WAL 换路径时，逻辑 session 的持久 offset 会跟随它，避免重复生长。
+Append-only JSONL 使用 byte offset；会被原子重写的 snapshot source 使用 mtime + 完整文件
+边界，二者都在应用非幂等树操作前先提交消费位置。
 
-Adapter 保留用户原文、assistant 对话文本、工具名计数与工具错误；丢弃 thinking、工具结果正文、tool_use 参数和系统注入。SessionMap 自己发起的 roll prompt 带固定哨兵，adapter 同时识别新旧品牌哨兵，防止升级期间自噬。
+Adapter 保留用户原文、assistant 对话文本、工具名计数与工具错误；丢弃 thinking、工具结果正文、tool_use 参数和系统注入。Memory、输入历史、索引和摘要只可用于补充 cwd / title，不能替代 provider 的恢复源。SessionMap 自己发起的 roll prompt 带固定哨兵，adapter 同时识别新旧品牌哨兵，防止升级期间自噬。
 
 ## 树写边界
 
@@ -134,21 +138,31 @@ Session 动作使用确定的降级阶梯。持久 handle 和 PID 只作为候�
 3. 快速路径失效时，并行刷新 Orca、transcript 与进程证据，重新解析现有 terminal；
 4. 仍无活入口时，新建 terminal 执行 provider 的 resume 命令。
 
+快速路径必须保持 O(1) 身份验证：缓存 handle 或 PID 命中时，不运行全量发现；只有快速
+路径失效才并行刷新证据。恢复命令由 provider registry 唯一生成，动作层不得复制
+provider 特例。完整取舍见 [ADR 0002](decisions/0002-provider-session-adapters.md)。
+
 同一 session 的在途动作在浏览器和服务端同时去重。无法完成时必须给出明确错误，
 不能让入口变成无反馈的假按钮。
 
-## 本地网页与服务
+## 本地地图文档、快速入口与服务
 
-系统浏览器是唯一产品界面。Bun 服务同时负责 transcript watcher、状态写入、vendored
+唯一正式界面是 Bun 服务提供的同一地图文档。系统浏览器是跨平台基线，installed Web App
+和 macOS 极薄壳只提供独立窗口与 Dock 身份。Bun 服务同时负责 transcript watcher、状态写入、vendored
 Web 资产和受回环同源边界保护的 API；服务端读取投影提供主题、稳定 session 目录、
-有界 session 脉络与主题全貌结构，浏览器只持有滚动、披露和局部相机等读取偏好，不保存
+有界 session 脉络与主题全貌结构，展示容器只持有滚动、披露、局部相机、窗口几何等读取
+偏好，不保存
 第二份业务状态。任意本机浏览器或新 profile 直接打开固定地址都读取同一份真实 snapshot。
 默认目录使用页面纵向滚动；二维平移缩放只属于
 按需展开的主题全貌，不能成为寻找 session 的旁路导航机制。
 
 服务可由 `sessionmap serve` 前台运行，也可用 standalone CLI 的 `sessionmap install`
-安装为当前用户的 launchd 服务。`sessionmap open` 负责打开页面并确认首帧。Terminal、iTerm
-和 Orca 仍是跳转/恢复适配层，但不构成原生 SessionMap 客户端。
+安装为当前用户的 launchd 服务。`sessionmap open` 负责打开页面并确认首帧；`sessionmap now`
+只读同一 Now 投影，编号跳转仍通过后台 HTTP 动作完成。macOS 壳在服务不健康时只调用统一
+install 事务，不直接启动第二服务。Terminal、iTerm 和 Orca 仍是跳转/恢复适配层。
+
+展示容器契约与回滚见 [ADR 0004](decisions/0004-map-document-desktop-hosts.md) 和
+[桌面展示容器模块](modules/desktop-host.md)。
 
 ## 本地安全边界
 
@@ -186,3 +200,17 @@ Web 资产采用完整 bundle 内容版本。HTML、脚本、样式、vendor 和
 7. 失败则删除本轮新目录并恢复旧服务。
 
 旧状态目录保留，不把安全回滚能力误当作应立即清理的垃圾。
+
+## 发布与升级边界
+
+GitHub Release 是 standalone binary 的唯一事实源。已签名、公证的 macOS 安装包、Homebrew
+Formula 和校验安装脚本只是它的分发适配层，不直接写用户状态或管理 launchd。新装、升级
+和降级最终都收敛到 `sessionmap install`，由 launchd 模块原子替换稳定路径中的 binary，
+启动唯一 writer，确认 `/health` 后提交；失败则恢复旧 binary、plist 和服务。
+
+macOS 安装包把对应架构的已签名 binary 放到系统只读来源路径，并安装一个 universal、
+无状态的 SessionMap App 壳，再以当前控制台用户身份调用统一安装事务。App 承载同一地图
+文档但不成为第二个 runtime。发布
+渠道的完整决策、失败模型与备选方案见
+[ADR 0001](decisions/0001-standalone-release-channels.md)，操作契约见
+[迁移与发布模块](modules/migration-release.md)。

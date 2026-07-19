@@ -276,7 +276,7 @@ export class SessionMapHttpServer {
     if (!asset) return text("asset not found", 404);
     const version = this.assets.version();
     const versioned = suppliedVersion === version;
-    const body = asset.contentType.startsWith("text/css")
+    const body = asset.contentType.startsWith("text/css") || asset.contentType.startsWith("application/manifest+json")
       ? asset.body.replaceAll("__SESSIONMAP_ASSET_VERSION__", version)
       : asset.body;
     return new Response(body, {

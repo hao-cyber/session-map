@@ -11,12 +11,28 @@ describe("offline browser bundle", () => {
   });
 
   test("contains no external CDN or telemetry endpoint", () => {
-    const files = ["web/index.html", "web/app.js", "web/styles.css"];
+    const files = ["web/index.html", "web/app.js", "web/styles.css", "web/manifest.webmanifest", "web/sessionmap-icon.svg"];
     for (const file of files) {
       const source = readFileSync(resolve(root, file), "utf8");
-      expect(source).not.toMatch(/https?:\/\//);
+      expect(source.replace("http://www.w3.org/2000/svg", "")).not.toMatch(/https?:\/\//);
       expect(source.toLowerCase()).not.toContain("analytics");
     }
+  });
+
+  test("installs the same loopback map as a standalone web app", () => {
+    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
+    const manifest = JSON.parse(readFileSync(resolve(root, "web", "manifest.webmanifest"), "utf8"));
+    expect(html).toContain('rel="manifest"');
+    expect(html).toContain("/assets/sessionmap-icon.svg?v=__SESSIONMAP_ASSET_VERSION__");
+    expect(manifest).toMatchObject({
+      id: "/",
+      start_url: "/",
+      scope: "/",
+      display: "standalone",
+      theme_color: "#f7f7f8",
+    });
+    expect(manifest.icons[0]).toMatchObject({ type: "image/svg+xml", purpose: "any maskable" });
+    expect(readFileSync(resolve(root, "web", "app.js"), "utf8")).not.toContain("serviceWorker");
   });
 
   test("uses one semantic branch color instead of a rainbow palette", () => {

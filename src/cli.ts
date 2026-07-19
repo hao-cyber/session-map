@@ -7,6 +7,7 @@ import { DEFAULT_PORT } from "./constants.ts";
 import { seedDemo } from "./demo.ts";
 import { installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { Logger } from "./logger.ts";
+import { formatNow, nowItemAt, readNowSnapshot } from "./now.ts";
 import { openSessionMap } from "./open.ts";
 import { ensureCapabilityToken } from "./server.ts";
 import { InstanceLock, StateStore } from "./state.ts";
@@ -23,6 +24,9 @@ type Parsed = {
   open: boolean;
   watch: boolean;
   browser?: string;
+  json: boolean;
+  jump?: number;
+  reveal: boolean;
 };
 
 function parse(argv: string[]): Parsed {
@@ -32,12 +36,18 @@ function parse(argv: string[]): Parsed {
   let open = true;
   let watch = true;
   let browser: string | undefined;
+  let json = false;
+  let jump: number | undefined;
+  let reveal = false;
   for (let index = command === "serve" && argv[0]?.startsWith("-") ? 0 : 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--state-dir") directory = argv[++index];
     else if (arg === "--port") port = Number(argv[++index]);
     else if (arg === "--no-open") open = false;
     else if (arg === "--no-watch") watch = false;
+    else if (arg === "--json") json = true;
+    else if (arg === "--jump") jump = Number(argv[++index]);
+    else if (arg === "--open") reveal = true;
     else if (arg === "--browser") {
       const value = argv[++index];
       if (!value || value.length > 200 || /[\u0000-\u001f]/.test(value)) throw new Error("browser must name a macOS application");
@@ -48,13 +58,17 @@ function parse(argv: string[]): Parsed {
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65_535)) throw new Error("port must be 0-65535");
+  if (jump !== undefined && (!Number.isInteger(jump) || jump < 1)) throw new Error("--jump must be a positive item number");
   return {
     command,
     stateDirectory: stateDirectory(directory),
     ...(port !== undefined ? { port } : {}),
     open,
     watch,
+    json,
+    reveal,
     ...(browser ? { browser } : {}),
+    ...(jump !== undefined ? { jump } : {}),
   };
 }
 
@@ -64,6 +78,7 @@ function help(): void {
 Usage:
   sessionmap serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch] [--browser APP]
   sessionmap open [--port 4317] [--state-dir PATH] [--browser APP]
+  sessionmap now [--state-dir PATH] [--json] [--jump N] [--open]
   sessionmap once [--state-dir PATH]
   sessionmap demo [--state-dir PATH]
   sessionmap install [--state-dir PATH]
@@ -155,12 +170,50 @@ async function status(options: Parsed): Promise<void> {
   }, null, 2));
 }
 
+async function postLocalAction(port: number, path: string, body: Record<string, unknown>): Promise<{ ok?: boolean; message?: string }> {
+  const baseUrl = `http://127.0.0.1:${port}`;
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { Origin: baseUrl, "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new Error("SessionMap service is not reachable; run sessionmap install first");
+  }
+  const payload = await response.json().catch(() => null) as { ok?: boolean; message?: string; error?: string } | null;
+  if (!response.ok) throw new Error(payload?.error || payload?.message || `SessionMap action failed (${response.status})`);
+  return payload ?? {};
+}
+
+async function now(options: Parsed): Promise<void> {
+  if (options.json && (options.jump !== undefined || options.reveal)) {
+    throw new Error("--json cannot be combined with --jump or --open");
+  }
+  if (options.reveal) {
+    await openInstalled(options);
+    return;
+  }
+  const snapshot = readNowSnapshot(options.stateDirectory);
+  if (options.jump !== undefined) {
+    if (!snapshot) throw new Error("SessionMap has no state yet");
+    const item = nowItemAt(snapshot, options.jump);
+    const result = await postLocalAction(options.port ?? DEFAULT_PORT, "/api/jump", { sessionId: item.sessionId });
+    console.log(result.message || `已回到 ${item.mainline}`);
+    return;
+  }
+  console.log(options.json ? JSON.stringify(snapshot, null, 2) : formatNow(snapshot));
+}
+
 async function main(): Promise<void> {
   const options = parse(process.argv.slice(2));
   if (options.command === "help") help();
   else if (options.command === "version") console.log(VERSION);
   else if (options.command === "serve") await serve(options);
   else if (options.command === "open") await openInstalled(options);
+  else if (options.command === "now") await now(options);
   else if (options.command === "once") await once(options);
   else if (options.command === "demo") await demo(options);
   else if (options.command === "install") console.log(`Installed ${await installLaunchAgent(options.stateDirectory)}`);

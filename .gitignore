@@ -7,3 +7,11 @@ screenshots/
 .DS_Store
 .maintrail/
 .sessionmap/
+
+# Signing and App Store Connect credentials must stay outside the repository.
+*.p8
+*.p12
+*.pfx
+*.cer
+*.key
+*.certSigningRequest

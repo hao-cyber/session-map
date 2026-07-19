@@ -217,6 +217,12 @@ describe("action safety and Orca matching", () => {
     expect(resumeCommand(codex)).toBe(
       `cd ${shellQuote(cwd)} && env CODEX_HOME=${shellQuote(codexHome)} codex resume -c check_for_update_on_startup=false 'safe-id'`,
     );
+    expect(resumeCommand({ ...session, provider: "kimi", path: "/Users/example/.kimi/sessions/hash/safe-id/context.jsonl" }))
+      .toBe(`cd ${shellQuote(cwd)} && env KIMI_SHARE_DIR='/Users/example/.kimi' kimi --session 'safe-id'`);
+    expect(resumeCommand({ ...session, provider: "grok", path: "/Users/example/.grok/sessions/cwd/safe-id/updates.jsonl" }))
+      .toBe(`cd ${shellQuote(cwd)} && env GROK_HOME='/Users/example/.grok' grok --resume 'safe-id'`);
+    expect(resumeCommand({ ...session, provider: "minimax", path: "/Users/example/.minimax/sessions/safe-id.json" }))
+      .toBe(`cd ${shellQuote(cwd)} && minimax --resume 'safe-id'`);
     expect(codexHomeForTranscript("relative/sessions/2026/rollout.jsonl")).toBeNull();
   });
 
@@ -586,6 +592,13 @@ describe("local HTTP security boundary", () => {
     expect(styles).toContain(`archive.svg?v=${version}`);
     expect(styles).not.toContain("__SESSIONMAP_ASSET_VERSION__");
     expect((await fetch(`${server.url}/assets/unknown.js`)).status).toBe(404);
+    const manifest = await fetch(`${server.url}/assets/manifest.webmanifest?v=${version}`);
+    expect(manifest.headers.get("content-type")).toContain("application/manifest+json");
+    const manifestBody = await manifest.json();
+    expect(manifestBody.display).toBe("standalone");
+    expect(manifestBody.icons[0].src).toContain(`?v=${version}`);
+    expect((await fetch(`${server.url}/assets/sessionmap-icon.svg?v=${version}`)).headers.get("cache-control"))
+      .toContain("immutable");
   });
 
   test("exchanges an open ticket once and acknowledges the first rendered frame", async () => {

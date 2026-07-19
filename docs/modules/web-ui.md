@@ -3,12 +3,14 @@
 ## 职责
 
 呈现固定的三层地图：主题/工作主线 → session → 可展开因果脉络，并提供独立的主题
-全貌入口。常态是纵向滚动的主题与 session 目录；系统浏览器是唯一正式产品界面。
+全貌入口。常态是纵向滚动的主题与 session 目录；系统浏览器、installed Web App 和
+macOS 极薄壳承载同一份正式地图文档。
 
 ## 代码入口
 
 - `src/render.ts`：把状态投影成读取模型与安全 HTML。
 - `web/index.html`、`web/styles.css`、`web/app.js`：结构、视觉与交互。
+- `web/manifest.webmanifest`、`web/sessionmap-icon.svg`：可安装窗口 metadata 与本地图标。
 - `src/assets.ts`：vendored runtime 资产加载与热更新。
 - `src/server.ts`：快照、事件流和回环同源边界。
 
@@ -37,6 +39,8 @@
   CSS 引用的图标同样带版本。只有匹配当前版本的资产响应可以使用 immutable 缓存，
   无版本或版本不匹配的请求必须 `no-store`，避免新 HTML 与旧 JS 跨版本混装。
 - Web runtime 全部 vendored，不允许 CDN、远程字体、analytics 或 telemetry。
+- Manifest 只声明同源根地址、standalone 窗口和 vendored 图标；不得注册 service worker、
+  离线状态副本或浏览器专属业务入口。所有展示容器继续读取同一 snapshot。
 
 ## 披露、滚动与局部视窗协议
 
@@ -68,7 +72,7 @@
 ## 验证
 
 自动覆盖在 `tests/web-assets.test.ts` 与 `tests/render-actions-server.test.ts`。UI 改动还必须
-用代表性桌面尺寸生成真实截图，检查三层层级、长目录滚动、溢出、命中区、状态反馈、
+用代表性桌面尺寸在浏览器和 App 中生成真实截图，检查三层层级、长目录滚动、溢出、命中区、状态反馈、
 局部 Fit、披露持久性和热更新。交互验证必须覆盖：单击 session 原地展开脉络且触发行
 保持屏幕位置；再次单击或点击“收起”恢复目录；双击 session 只跳转且不遗留单击展开；
 展开一个脉络后执行页面滚动、resize 与刷新，该脉络保持展开；主题全貌中的结构节点在

@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+  <title>SessionMap</title>
+  <options customize="never" require-scripts="true"/>
+  <domains enable_anywhere="false" enable_currentUserHome="false" enable_localSystem="true"/>
+  <volume-check script="system.compareVersions(system.version.ProductVersion, '13.0') &gt;= 0"/>
+  <script><![CDATA[
+    function appleSilicon() {
+      return system.sysctl('hw.optional.arm64') === 1;
+    }
+  ]]></script>
+  <choices-outline>
+    <line choice="sessionmap-arm64"/>
+    <line choice="sessionmap-x86_64"/>
+  </choices-outline>
+  <choice id="sessionmap-arm64" title="SessionMap for Apple Silicon" visible="false" selected="appleSilicon()">
+    <pkg-ref id="com.haocyber.sessionmap.arm64"/>
+  </choice>
+  <choice id="sessionmap-x86_64" title="SessionMap for Intel" visible="false" selected="!appleSilicon()">
+    <pkg-ref id="com.haocyber.sessionmap.x86_64"/>
+  </choice>
+  <pkg-ref id="com.haocyber.sessionmap.arm64">sessionmap-arm64.pkg</pkg-ref>
+  <pkg-ref id="com.haocyber.sessionmap.x86_64">sessionmap-x86_64.pkg</pkg-ref>
+</installer-gui-script>

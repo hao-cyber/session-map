@@ -58,6 +58,55 @@ describe("transcript adapters", () => {
     expect(delta.text).not.toContain("private output");
   });
 
+  test("parses Kimi context without treating checkpoints or thinking as dialogue", () => {
+    const { path } = fixture("context.jsonl");
+    writeJsonLines(path, [
+      { role: "_system_prompt", content: "private system" },
+      { role: "user", content: "继续 Kimi 工作线" },
+      { role: "assistant", content: [{ type: "thinking", text: "private thought" }, { type: "text", text: "已完成 Kimi 验证" }, { type: "tool_use", name: "Shell", input: "private" }] },
+    ]);
+    const delta = readTranscriptDelta(path, "kimi", { sessionId: "kimi-id", cwd: "/repo" });
+    expect(delta.meta).toMatchObject({ sessionId: "kimi-id", cwd: "/repo" });
+    expect(delta.text).toContain("继续 Kimi 工作线");
+    expect(delta.text).toContain("已完成 Kimi 验证");
+    expect(delta.text).toContain("Shell×1");
+    expect(delta.text).not.toContain("private system");
+    expect(delta.text).not.toContain("private thought");
+  });
+
+  test("parses Grok authoritative ACP updates and drops raw tool payloads", () => {
+    const { path } = fixture("updates.jsonl");
+    writeJsonLines(path, [
+      { method: "session/update", params: { sessionId: "grok-id", update: { sessionUpdate: "user_message_chunk", content: { type: "text", text: "继续 Grok 工作线" } } } },
+      { method: "session/update", params: { sessionId: "grok-id", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "已验证 Grok" } } } },
+      { method: "session/update", params: { sessionId: "grok-id", update: { sessionUpdate: "tool_call", title: "Read", rawInput: "private" } } },
+      { method: "session/update", params: { sessionId: "grok-id", update: { sessionUpdate: "tool_call_update", status: "failed", rawOutput: "private output" } } },
+    ]);
+    const delta = readTranscriptDelta(path, "grok", { sessionId: "grok-id", cwd: "/repo" });
+    expect(delta.text).toContain("继续 Grok 工作线");
+    expect(delta.text).toContain("已验证 Grok");
+    expect(delta.text).toContain("Read×1");
+    expect(delta.text).toContain("tool_result:error");
+    expect(delta.text).not.toContain("private output");
+  });
+
+  test("reads bounded MiniMax JSON snapshots as full session sources", () => {
+    const { path } = fixture("minimax-id.json");
+    writeFileSync(path, JSON.stringify({
+      metadata: { id: "minimax-id", workspace: "/repo", title: "MiniMax work" },
+      messages: [
+        { role: "user", content: [{ type: "text", text: "继续 MiniMax 工作线" }] },
+        { role: "assistant", content: [{ type: "text", text: "已验证 snapshot" }, { type: "tool_use", name: "bash", input: "private" }] },
+      ],
+    }));
+    const delta = readTranscriptDelta(path, "minimax", { kind: "snapshot", title: "MiniMax work" });
+    expect(delta.meta).toMatchObject({ sessionId: "minimax-id", cwd: "/repo", title: "MiniMax work" });
+    expect(delta.nextOffset).toBe(statSync(path).size);
+    expect(delta.text).toContain("继续 MiniMax 工作线");
+    expect(delta.text).toContain("bash×1");
+    expect(delta.text).not.toContain("private");
+  });
+
   test("removes only structural system-injection prefixes", () => {
     expect(stripInjectedPrefixes("<system-reminder>noise</system-reminder>\n真实用户消息")).toBe("真实用户消息");
     expect(stripInjectedPrefixes("用户提到 <system-reminder> 是文本")).toContain("system-reminder");
@@ -138,6 +187,9 @@ describe("transcript adapters", () => {
     expect(providerForPath("/Users/a/.claude/projects/x/id.jsonl")).toBe("claude");
     expect(providerForPath("/Users/a/.codex/sessions/2026/01/01/rollout-id.jsonl")).toBe("codex");
     expect(providerForPath("/Users/a/Library/Application Support/orca/codex-runtime-home/home/sessions/2026/01/01/rollout-id.jsonl")).toBe("codex");
+    expect(providerForPath("/Users/a/.kimi/sessions/hash/kimi-id/context.jsonl")).toBe("kimi");
+    expect(providerForPath("/Users/a/.grok/sessions/cwd/grok-id/updates.jsonl")).toBe("grok");
+    expect(providerForPath("/Users/a/.minimax/sessions/minimax-id.json")).toBe("minimax");
     expect(providerForPath("/tmp/random.jsonl")).toBeNull();
   });
 });

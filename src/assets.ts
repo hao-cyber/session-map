@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import INDEX_HTML_IMPORT from "../web/index.html" with { type: "text" };
 import APP_JS_IMPORT from "../web/app.js" with { type: "text" };
 import STYLES_CSS_IMPORT from "../web/styles.css" with { type: "text" };
+import MANIFEST_IMPORT from "../web/manifest.webmanifest" with { type: "text" };
+import SESSIONMAP_ICON_IMPORT from "../web/sessionmap-icon.svg" with { type: "text" };
 import D3_JS_IMPORT from "../web/vendor/d3.min.js" with { type: "text" };
 import MARKMAP_LIB_JS_IMPORT from "../web/vendor/markmap-lib.js" with { type: "text" };
 import MARKMAP_VIEW_JS_IMPORT from "../web/vendor/markmap-view.js" with { type: "text" };
@@ -27,6 +29,8 @@ import ZOOM_SVG_IMPORT from "../web/vendor/icons/zoom-in.svg" with { type: "text
 const INDEX_HTML = INDEX_HTML_IMPORT as unknown as string;
 const APP_JS = APP_JS_IMPORT as unknown as string;
 const STYLES_CSS = STYLES_CSS_IMPORT as unknown as string;
+const MANIFEST = MANIFEST_IMPORT as unknown as string;
+const SESSIONMAP_ICON = SESSIONMAP_ICON_IMPORT as unknown as string;
 const D3_JS = D3_JS_IMPORT as unknown as string;
 const MARKMAP_LIB_JS = MARKMAP_LIB_JS_IMPORT as unknown as string;
 const MARKMAP_VIEW_JS = MARKMAP_VIEW_JS_IMPORT as unknown as string;
@@ -51,6 +55,8 @@ const EMBEDDED: Record<string, Asset> = {
   "index.html": { body: INDEX_HTML, contentType: "text/html; charset=utf-8", source: "index.html" },
   "app.js": { body: APP_JS, contentType: "text/javascript; charset=utf-8", source: "app.js" },
   "styles.css": { body: STYLES_CSS, contentType: "text/css; charset=utf-8", source: "styles.css" },
+  "manifest.webmanifest": { body: MANIFEST, contentType: "application/manifest+json; charset=utf-8", source: "manifest.webmanifest" },
+  "sessionmap-icon.svg": { body: SESSIONMAP_ICON, contentType: "image/svg+xml", source: "sessionmap-icon.svg" },
   "vendor/d3.min.js": { body: D3_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/d3.min.js" },
   "vendor/markmap-lib.js": { body: MARKMAP_LIB_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/markmap-lib.js" },
   "vendor/markmap-view.js": { body: MARKMAP_VIEW_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/markmap-view.js" },

@@ -331,6 +331,10 @@ export function buildNowItems(state: TrailState, now = Date.now()): NowItem[] {
     const blockers = countBlockers(state, rootId);
     const sessions = rootSessions(state, rootId);
     const session = primarySession(sessions);
+    // A mainline already represented by an explicit ask must not reappear as
+    // a lower-priority blocker/busy/recent item. Now is an action index, not a
+    // complete status feed.
+    if (sessions.some((candidate) => candidate.ask.kind !== "none")) continue;
     if (blockers) {
       items.push({
         kind: "blocker",

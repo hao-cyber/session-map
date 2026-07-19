@@ -40,5 +40,5 @@ export const NODE_TYPES = [
 
 export const NODE_STATES = ["active", "waiting", "resolved", "dead"] as const;
 export const ASK_KINDS = ["decision", "review", "reply", "none"] as const;
-export const PROVIDERS = ["claude", "codex"] as const;
+export const PROVIDERS = ["claude", "codex", "kimi", "grok", "minimax"] as const;
 export const ENGINE_NAMES = ["claude", "codex", "kimi", "grok"] as const;

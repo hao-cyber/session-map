@@ -1,0 +1,37 @@
+#!/bin/sh
+
+set -eu
+
+SYSTEM_BINARY="/usr/local/libexec/sessionmap/sessionmap"
+CONSOLE_USER="$(/usr/bin/stat -f '%Su' /dev/console)"
+
+case "$CONSOLE_USER" in
+  ''|root|loginwindow|*[!A-Za-z0-9._-]*)
+    printf 'SessionMap requires an active macOS user session; found %s.\n' "$CONSOLE_USER" >&2
+    exit 1
+    ;;
+esac
+
+CONSOLE_UID="$(/usr/bin/id -u "$CONSOLE_USER")"
+CONSOLE_HOME="$(/usr/bin/dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory | /usr/bin/sed 's/^NFSHomeDirectory: //')"
+case "$CONSOLE_HOME" in
+  /*) ;;
+  *)
+    printf 'Could not resolve the home directory for %s.\n' "$CONSOLE_USER" >&2
+    exit 1
+    ;;
+esac
+if [ ! -x "$SYSTEM_BINARY" ]; then
+  printf 'SessionMap payload is missing at %s.\n' "$SYSTEM_BINARY" >&2
+  exit 1
+fi
+
+# The package owns only the immutable source binary. All per-user state,
+# launchd installation, health checks, migration and rollback remain owned by
+# the same CLI transaction used by every other distribution channel.
+/bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -H -u "$CONSOLE_USER" "$SYSTEM_BINARY" install
+if [ -d "/Applications/SessionMap.app" ]; then
+  /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -H -u "$CONSOLE_USER" /usr/bin/open "/Applications/SessionMap.app"
+else
+  /bin/launchctl asuser "$CONSOLE_UID" /usr/bin/sudo -H -u "$CONSOLE_USER" "$CONSOLE_HOME/.local/bin/sessionmap" open
+fi

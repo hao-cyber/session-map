@@ -70,10 +70,18 @@ export function browserApplicationName(browser: string): string {
   return aliases[browser.toLowerCase()] || browser;
 }
 
+function sessionMapApplication(browser: string): boolean {
+  const name = browser.split(/[\\/]/).at(-1)?.replace(/\.app$/i, "").toLowerCase();
+  return name === "sessionmap" || browser.toLowerCase() === "com.haocyber.sessionmap";
+}
+
 export async function launchBrowser(url: string, browser?: string): Promise<void> {
   if (process.platform !== "darwin") throw new Error("opening a browser is currently supported on macOS only");
   const application = browser ? browserApplicationName(browser) : null;
-  const command = application ? ["/usr/bin/open", "-a", application, url] : ["/usr/bin/open", url];
+  const target = browser && sessionMapApplication(browser)
+    ? `sessionmap://open?url=${encodeURIComponent(url)}`
+    : url;
+  const command = application ? ["/usr/bin/open", "-a", application, target] : ["/usr/bin/open", target];
   const processHandle = Bun.spawn(command, { stdin: "ignore", stdout: "ignore", stderr: "pipe" });
   const [exitCode, stderr] = await Promise.all([
     processHandle.exited,
