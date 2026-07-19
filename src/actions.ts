@@ -142,12 +142,34 @@ export class ActionRouter {
     try {
       const session = this.session(id);
       const orca = await this.dependencies.readOrcaSnapshot();
+      const orcaMatch = orca.available ? matchOrcaSession(session, orca) : {};
       if (orca.available) {
-        const match = matchOrcaSession(session, orca);
-        if (match.terminal?.connected) {
-          await this.dependencies.runOrcaJson(["terminal", "switch", "--terminal", match.terminal.handle]);
+        if (orcaMatch.terminal?.connected) {
+          await this.dependencies.runOrcaJson(["terminal", "switch", "--terminal", orcaMatch.terminal.handle]);
           return { ok: true, mode: "orca-switch", message: "已切换到 Orca 终端" };
         }
+      }
+
+      // A persisted PID is only a cache and may have been reused after the
+      // original agent exited. Re-resolve the process from exact live evidence
+      // on every click before deriving a TTY and focusing another application.
+      const [transcriptProcesses, processes] = await Promise.all([
+        this.dependencies.readTranscriptProcesses(),
+        this.dependencies.readProcesses(),
+      ]);
+      const transcriptProcess = transcriptProcesses.find((candidate) => candidate.sessionId === session.id);
+      const process = transcriptProcess ?? processForSession(session, processes);
+      const pid = process?.pid;
+      if (pid) {
+        const tty = await ttyForPid(pid, this.dependencies.runText);
+        if (tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
+          return { ok: true, mode: "native-focus", message: "已聚焦系统终端" };
+        }
+      }
+      if (orcaMatch.ambiguous) {
+        return { ok: false, mode: "error", message: "发现多个相似 Orca 终端，已停止以免切错 session" };
+      }
+      if (orca.available) {
         try {
           const command = resumeCommand(session);
           const created = await this.dependencies.runOrcaJson([
@@ -176,20 +198,6 @@ export class ActionRouter {
           return { ok: true, mode: "orca-resume", message: "已在 Orca 中复活 session" };
         } catch {
           // The cwd may not be registered in Orca. Native fallback preserves the affordance.
-        }
-      }
-
-      let pid = session.pid;
-      if (!pid) {
-        const transcriptProcess = (await this.dependencies.readTranscriptProcesses())
-          .find((candidate) => candidate.sessionId === session.id);
-        const process = transcriptProcess ?? processForSession(session, await this.dependencies.readProcesses());
-        pid = process?.pid;
-      }
-      if (pid) {
-        const tty = await ttyForPid(pid, this.dependencies.runText);
-        if (tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
-          return { ok: true, mode: "native-focus", message: "已聚焦系统终端" };
         }
       }
       const command = resumeCommand(session);

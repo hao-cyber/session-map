@@ -202,6 +202,51 @@ describe("tree write boundary", () => {
     expect(store.snapshot().archived).not.toContain(line.rootId);
   });
 
+  test("closed nodes keep their recorded labels", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("closed-label", process.cwd());
+    await runtime.applyRoll(meta, {
+      mainline: "保留历史措辞",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "旧假设" }],
+    });
+    const node = store.snapshot().sessions["closed-label"]!.cursor!;
+    await runtime.applyRoll(meta, {
+      mainline: "保留历史措辞",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "close", node, state: "dead", note: "证据推翻" }],
+    });
+    const result = await runtime.applyRoll(meta, {
+      mainline: "保留历史措辞",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "rename", node, label: "无痕改写" }],
+    });
+    expect(result.accepted).toBe(0);
+    expect(result.rejected[0]).toContain("recorded label");
+    expect(store.snapshot().nodes[node]?.label).toBe("旧假设");
+  });
+
+  test("requires a reason before closing a direction", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("close-reason", process.cwd());
+    await runtime.applyRoll(meta, {
+      mainline: "保留关闭原因",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "待验证方向" }],
+    });
+    const node = store.snapshot().sessions["close-reason"]!.cursor!;
+    const result = await runtime.applyRoll(meta, {
+      mainline: "保留关闭原因",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "close", node, state: "dead" }],
+    });
+    expect(result.accepted).toBe(0);
+    expect(result.rejected[0]).toContain("requires a note");
+    expect(store.snapshot().nodes[node]?.state).toBe("active");
+  });
+
   test("revises the reading snapshot while preserving the superseded path", async () => {
     const store = new StateStore(directory());
     const runtime = new TreeRuntime(store);

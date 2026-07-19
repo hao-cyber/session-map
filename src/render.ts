@@ -288,7 +288,7 @@ export function renderMarkdown(state: TrailState, now = Date.now()): string {
 export function buildNowItems(state: TrailState, now = Date.now()): NowItem[] {
   const items: Array<NowItem & { priority: number }> = [];
   for (const session of Object.values(state.sessions)) {
-    if (!session.mainline) continue;
+    if (!session.mainline || !session.rootId || state.archived.includes(session.rootId)) continue;
     if (session.ask.kind === "decision") {
       items.push({
         kind: "decision",

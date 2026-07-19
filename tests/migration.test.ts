@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { migrateLegacyState } from "../src/migration.ts";
+import { createEmptyState } from "../src/state.ts";
 import { defaultStateDirectory, legacyStateDirectory } from "../src/utils.ts";
 import { cleanup, temporaryDirectory } from "./helpers.ts";
 
@@ -31,7 +32,18 @@ describe("SessionMap 状态迁移", () => {
   test("原子复制持久状态和 token，但不复制锁与日志", () => {
     const { legacy, current } = fixture();
     mkdirSync(legacy, { recursive: true, mode: 0o700 });
-    const state = `${JSON.stringify({ revision: 17, offsets: { a: { offset: 99 } }, roots: ["root-a"] }, null, 2)}\n`;
+    const durable = createEmptyState("codex", "2026-07-18T00:00:00.000Z");
+    durable.schemaVersion = 1;
+    durable.revision = 17;
+    durable.offsets.a = {
+      path: "/tmp/a.jsonl",
+      provider: "codex",
+      sessionId: "a",
+      offset: 99,
+      mtimeMs: 1,
+      cooldownUntil: 0,
+    };
+    const state = `${JSON.stringify(durable, null, 2)}\n`;
     writeFileSync(join(legacy, "state.json"), state, { mode: 0o600 });
     writeFileSync(join(legacy, "capability.token"), "private-token\n", { mode: 0o600 });
     writeFileSync(join(legacy, ".instance.lock"), "runtime-only");
@@ -66,6 +78,22 @@ describe("SessionMap 状态迁移", () => {
     mkdirSync(legacy, { recursive: true });
     writeFileSync(join(legacy, "state.json"), "{broken", { mode: 0o600 });
     expect(() => migrateLegacyState(legacy, current)).toThrow();
+    expect(existsSync(current)).toBeFalse();
+  });
+
+  test("可解析但会在升级时丢对象的旧状态同样拒绝发布", () => {
+    const { legacy, current } = fixture();
+    mkdirSync(legacy, { recursive: true });
+    writeFileSync(join(legacy, "state.json"), JSON.stringify({
+      schemaVersion: 1,
+      revision: 9,
+      engine: "codex",
+      roots: ["missing-root"],
+      nodes: {},
+      sessions: {},
+      offsets: {},
+    }), { mode: 0o600 });
+    expect(() => migrateLegacyState(legacy, current)).toThrow("without losing durable objects");
     expect(existsSync(current)).toBeFalse();
   });
 });

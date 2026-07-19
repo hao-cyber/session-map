@@ -12,6 +12,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { repairState } from "./state.ts";
+import { isRecord } from "./utils.ts";
 
 export interface StateMigrationResult {
   migrated: boolean;
@@ -33,6 +35,24 @@ function copyPrivateFile(source: string, destination: string): void {
   copyFileSync(source, destination);
   chmodSync(destination, 0o600);
   syncFile(destination);
+}
+
+function validateMigratableState(input: unknown): void {
+  if (!isRecord(input) || !isRecord(input.nodes) || !Array.isArray(input.roots) ||
+      !isRecord(input.sessions) || !isRecord(input.offsets) || typeof input.engine !== "string") {
+    throw new Error("legacy state is missing required durable collections");
+  }
+  const repaired = repairState(input).state;
+  const missingRoots = input.roots.filter((id): id is string =>
+    typeof id === "string" && !repaired.roots.includes(id)
+  );
+  const missingNodes = Object.keys(input.nodes).filter((id) => !repaired.nodes[id]);
+  const missingSessions = Object.keys(input.sessions).filter((id) => !repaired.sessions[id]);
+  const missingOffsets = Object.keys(input.offsets).filter((id) => !repaired.offsets[id]);
+  if (missingRoots.length || missingNodes.length || missingSessions.length || missingOffsets.length ||
+      repaired.engine !== input.engine) {
+    throw new Error("legacy state cannot be upgraded without losing durable objects");
+  }
 }
 
 /**
@@ -60,7 +80,7 @@ export function migrateLegacyState(
   // Byte-identical corruption is still corruption. Refuse to publish an
   // unreadable legacy state so the installer can restart the untouched old
   // service instead of presenting an apparently healthy empty tree.
-  JSON.parse(readFileSync(sourceState, "utf8"));
+  validateMigratableState(JSON.parse(readFileSync(sourceState, "utf8")));
 
   const parent = dirname(destination);
   mkdirSync(parent, { recursive: true, mode: 0o700 });

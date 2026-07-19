@@ -20,8 +20,9 @@ struct MapWebView: NSViewRepresentable {
 
   func updateNSView(_ webView: WKWebView, context: Context) {
     guard service.isReady, !context.coordinator.hasLoaded else { return }
+    guard let url = service.authenticatedURL(shell: true) else { return }
+    webView.load(URLRequest(url: url))
     context.coordinator.hasLoaded = true
-    if let url = service.authenticatedURL(shell: true) { webView.load(URLRequest(url: url)) }
   }
 
   final class Coordinator: NSObject, WKNavigationDelegate {

@@ -30,6 +30,7 @@ export interface OrcaSessionMatch {
   agent?: OrcaAgent;
   terminal?: OrcaTerminal;
   paneKey?: string;
+  ambiguous?: boolean;
 }
 
 export function orcaPath(): string | null {
@@ -129,6 +130,19 @@ function samePrompt(left: string, right: string): boolean {
   return Math.min(a.length, b.length) >= 128 && (a.startsWith(b) || b.startsWith(a));
 }
 
+function sameWorktree(session: SessionRecord, worktreePath: string): boolean {
+  return Boolean(session.cwd && worktreePath && session.cwd === worktreePath);
+}
+
+function sameProvider(session: SessionRecord, agentType: string): boolean {
+  const value = normalizeText(agentType).toLowerCase();
+  return value === session.provider || value.startsWith(`${session.provider}-`);
+}
+
+function unique<T>(values: T[]): T | undefined {
+  return values.length === 1 ? values[0] : undefined;
+}
+
 export function matchOrcaSession(session: SessionRecord, snapshot: OrcaSnapshot): OrcaSessionMatch {
   const rememberedTerminal = session.terminalHandle
     ? snapshot.terminals.find((candidate) => candidate.handle === session.terminalHandle)
@@ -144,10 +158,26 @@ export function matchOrcaSession(session: SessionRecord, snapshot: OrcaSnapshot)
     };
   }
 
-  let agent = snapshot.agents.find((candidate) => samePrompt(session.lastUser, candidate.prompt));
+  // Prompt and title are model/UI text, not stable identities. They are only
+  // safe as a bootstrap hint when provider + worktree also agree and exactly
+  // one Orca pane matches. Once a handle/paneKey is learned, the exact branch
+  // above remains the primary path.
+  const promptMatches = snapshot.agents.filter((candidate) =>
+    sameProvider(session, candidate.agentType) &&
+    sameWorktree(session, candidate.worktreePath) &&
+    samePrompt(session.lastUser, candidate.prompt)
+  );
+  if (promptMatches.length > 1) return { ambiguous: true };
+  let agent = unique(promptMatches);
   if (!agent && session.title) {
     const title = normalizeText(stripSpinner(session.title));
-    agent = snapshot.agents.find((candidate) => normalizeText(stripSpinner(candidate.taskTitle)) === title);
+    const titleMatches = snapshot.agents.filter((candidate) =>
+      sameProvider(session, candidate.agentType) &&
+      sameWorktree(session, candidate.worktreePath) &&
+      normalizeText(stripSpinner(candidate.taskTitle)) === title
+    );
+    if (titleMatches.length > 1) return { ambiguous: true };
+    agent = unique(titleMatches);
   }
   if (agent) {
     const terminal = snapshot.terminals.find((candidate) => candidate.paneKey === agent?.paneKey);
@@ -155,10 +185,12 @@ export function matchOrcaSession(session: SessionRecord, snapshot: OrcaSnapshot)
   }
 
   const title = normalizeText(stripSpinner(session.title));
-  const terminal = snapshot.terminals.find((candidate) => {
+  const terminalMatches = snapshot.terminals.filter((candidate) => {
     if (!title) return false;
     return normalizeText(stripSpinner(candidate.title)) === title &&
-      (!session.cwd || !candidate.worktreePath || session.cwd === candidate.worktreePath);
+      sameWorktree(session, candidate.worktreePath);
   });
+  if (terminalMatches.length > 1) return { ambiguous: true };
+  const terminal = unique(terminalMatches);
   return terminal ? { terminal, paneKey: terminal.paneKey } : {};
 }

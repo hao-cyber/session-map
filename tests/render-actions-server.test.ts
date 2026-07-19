@@ -73,6 +73,22 @@ describe("safe rendering and attention ordering", () => {
     expect(activeSessionCount(store.snapshot())).toBe(2);
   });
 
+  test("removes archived mainline asks from Now without deleting sessions", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const line = await runtime.applyRoll(transcriptMeta("archived-decision", process.cwd()), {
+      mainline: "暂存发布决策",
+      ask: { kind: "decision", hint: "选择渠道" },
+      ops: [],
+    });
+    expect(buildNowItems(store.snapshot()).map((item) => item.sessionId)).toContain("archived-decision");
+    await runtime.archive(line.rootId);
+    expect(buildNowItems(store.snapshot()).map((item) => item.sessionId)).not.toContain("archived-decision");
+    expect(store.snapshot().sessions["archived-decision"]).toBeDefined();
+    await runtime.restore(line.rootId);
+    expect(buildNowItems(store.snapshot()).map((item) => item.sessionId)).toContain("archived-decision");
+  });
+
   test("renders topic sessions as stable second-level navigation entries", async () => {
     const store = new StateStore(directory());
     const runtime = new TreeRuntime(store);
@@ -180,6 +196,39 @@ describe("action safety and Orca matching", () => {
     }).terminal?.handle).toBe("remembered");
   });
 
+  test("refuses ambiguous or cross-worktree Orca text matches", () => {
+    const session = sessionRecord("s", "/repo");
+    session.lastUser = "same prompt";
+    session.title = "same title";
+    const agent = {
+      paneKey: "tab:a",
+      state: "working",
+      agentType: "claude",
+      prompt: "same prompt",
+      taskTitle: "same title",
+      updatedAt: Date.now(),
+      worktreePath: "/repo",
+    };
+    const terminal = {
+      handle: "terminal-a",
+      paneKey: "tab:a",
+      title: "same title",
+      connected: true,
+      writable: true,
+      worktreePath: "/repo",
+    };
+    expect(matchOrcaSession(session, {
+      available: true,
+      agents: [agent, { ...agent, paneKey: "tab:b" }],
+      terminals: [terminal, { ...terminal, handle: "terminal-b", paneKey: "tab:b" }],
+    })).toEqual({ ambiguous: true });
+    expect(matchOrcaSession(session, {
+      available: true,
+      agents: [{ ...agent, worktreePath: "/other" }],
+      terminals: [{ ...terminal, worktreePath: "/other" }],
+    }).terminal).toBeUndefined();
+  });
+
   test("remembers a created Orca handle so the next click switches instead of duplicating", async () => {
     const store = new StateStore(directory());
     const session = { ...sessionRecord("orca-session", process.cwd()), provider: "codex" as const };
@@ -219,6 +268,40 @@ describe("action safety and Orca matching", () => {
     expect(commands.filter((command) => command[1] === "switch")).toHaveLength(1);
   });
 
+  test("does not switch, send, or resume when Orca text matching is ambiguous", async () => {
+    const store = new StateStore(directory());
+    const session = sessionRecord("ambiguous-orca", process.cwd());
+    session.lastUser = "same prompt";
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const commands: string[][] = [];
+    const agent = {
+      paneKey: "tab:a",
+      state: "working",
+      agentType: "claude",
+      prompt: "same prompt",
+      taskTitle: "",
+      updatedAt: Date.now(),
+      worktreePath: session.cwd,
+    };
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => ({
+        available: true,
+        agents: [agent, { ...agent, paneKey: "tab:b" }],
+        terminals: [],
+      }),
+      runOrcaJson: async (command) => { commands.push(command); return {}; },
+      readTranscriptProcesses: async () => [],
+      readProcesses: async () => [],
+      runAppleScript: async () => true,
+    });
+    const jumped = await actions.jump(session.id);
+    expect(jumped).toMatchObject({ ok: false, mode: "error" });
+    expect(jumped.message).toContain("停止以免切错");
+    const sent = await actions.say(session.id, "不要误发");
+    expect(sent).toMatchObject({ ok: false, mode: "manual" });
+    expect(commands).toHaveLength(0);
+  });
+
   test("focuses a live session by exact transcript process and TTY without Orca", async () => {
     const store = new StateStore(directory());
     const session = sessionRecord("live-session", process.cwd());
@@ -243,6 +326,26 @@ describe("action safety and Orca matching", () => {
     expect(scripts).toHaveLength(1);
     expect(scripts[0]?.args).toEqual(["/dev/ttys007"]);
     expect(scripts[0]?.script).toContain("targetTTY");
+  });
+
+  test("never focuses a stale persisted PID without current session evidence", async () => {
+    const store = new StateStore(directory());
+    const session = { ...sessionRecord("stale-pid", process.cwd()), pid: 4242 };
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const scripts: string[] = [];
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => ({ available: false, agents: [], terminals: [] }),
+      readTranscriptProcesses: async () => [],
+      readProcesses: async () => [{ pid: 4242, tty: "ttys009", command: "/bin/zsh" }],
+      runText: async () => ({ ok: true, text: "ttys009\n" }),
+      runAppleScript: async (script) => {
+        scripts.push(script);
+        return true;
+      },
+    });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-resume" });
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]).toContain("shellCommand");
   });
 
   test("resumes a closed session in Terminal and degrades send to manual without Orca", async () => {

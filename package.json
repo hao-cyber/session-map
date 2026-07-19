@@ -35,7 +35,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check:web": "bun run scripts/check-web.ts",
-    "check:native": "swift build --package-path native -c debug",
+    "check:native": "swift build --package-path native -c debug && swift build --package-path native -c release",
     "build": "bun run scripts/build.ts",
     "build:app": "bun run scripts/build-macos-app.ts",
     "release:mac": "bun run scripts/release-macos.ts",

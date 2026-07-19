@@ -223,9 +223,13 @@ export class TreeRuntime {
             reject("closed nodes preserve their recorded outcome; grow a revised direction instead");
             return;
           }
-          node.state = unknownOp.state as "resolved" | "dead";
           const note = canonicalNote(unknownOp.note);
-          if (note) node.note = note;
+          if (!note) {
+            reject("close requires a note");
+            return;
+          }
+          node.state = unknownOp.state as "resolved" | "dead";
+          node.note = note;
           node.updatedAt = at;
           accepted += 1;
           return;
@@ -260,6 +264,10 @@ export class TreeRuntime {
         if (op === "rename") {
           if (nodeId === rootId) {
             reject("mainline roots cannot be renamed by roll ops");
+            return;
+          }
+          if (node.state === "resolved" || node.state === "dead") {
+            reject("closed nodes preserve their recorded label; grow a revised direction instead");
             return;
           }
           const originalLabel = normalizeText(unknownOp.label);
