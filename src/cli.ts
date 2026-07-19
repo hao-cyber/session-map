@@ -7,6 +7,7 @@ import { DEFAULT_PORT } from "./constants.ts";
 import { seedDemo } from "./demo.ts";
 import { installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { Logger } from "./logger.ts";
+import { openSessionMap } from "./open.ts";
 import { ensureCapabilityToken } from "./server.ts";
 import { InstanceLock, StateStore } from "./state.ts";
 import { TreeRuntime } from "./tree.ts";
@@ -21,6 +22,7 @@ type Parsed = {
   port?: number;
   open: boolean;
   watch: boolean;
+  browser?: string;
 };
 
 function parse(argv: string[]): Parsed {
@@ -29,12 +31,18 @@ function parse(argv: string[]): Parsed {
   let port: number | undefined;
   let open = true;
   let watch = true;
+  let browser: string | undefined;
   for (let index = command === "serve" && argv[0]?.startsWith("-") ? 0 : 1; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--state-dir") directory = argv[++index];
     else if (arg === "--port") port = Number(argv[++index]);
     else if (arg === "--no-open") open = false;
     else if (arg === "--no-watch") watch = false;
+    else if (arg === "--browser") {
+      const value = argv[++index];
+      if (!value || value.length > 200 || /[\u0000-\u001f]/.test(value)) throw new Error("browser must name a macOS application");
+      browser = value;
+    }
     else if (arg === "--help" || arg === "-h") command = "help";
     else if (arg === "--version" || arg === "-v") command = "version";
     else throw new Error(`unknown argument: ${arg}`);
@@ -46,6 +54,7 @@ function parse(argv: string[]): Parsed {
     ...(port !== undefined ? { port } : {}),
     open,
     watch,
+    ...(browser ? { browser } : {}),
   };
 }
 
@@ -53,21 +62,16 @@ function help(): void {
   console.log(`SessionMap ${VERSION} — persistent thinking map for parallel coding agents
 
 Usage:
-  sessionmap serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch]
-  sessionmap open [--port 4317] [--state-dir PATH]
+  sessionmap serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch] [--browser APP]
+  sessionmap open [--port 4317] [--state-dir PATH] [--browser APP]
   sessionmap once [--state-dir PATH]
   sessionmap demo [--state-dir PATH]
   sessionmap install [--state-dir PATH]
   sessionmap uninstall
   sessionmap status [--state-dir PATH]
 
-State defaults to ~/Library/Application Support/SessionMap. The HTTP service binds only to 127.0.0.1.`);
-}
-
-async function openBrowser(url: string): Promise<void> {
-  if (process.platform !== "darwin") return;
-  const proc = Bun.spawn(["/usr/bin/open", url], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
-  await proc.exited;
+State defaults to ~/Library/Application Support/SessionMap. The HTTP service binds only to 127.0.0.1.
+Browser aliases: chrome, safari, firefox, edge, brave, arc. Any installed macOS application name is accepted.`);
 }
 
 async function serve(options: Parsed): Promise<void> {
@@ -78,8 +82,7 @@ async function serve(options: Parsed): Promise<void> {
   });
   app.start();
   console.log(`SessionMap is available at ${app.http.url}`);
-  if (options.open) void openBrowser(app.http.browserUrl());
-  await new Promise<void>((resolve) => {
+  const closing = new Promise<void>((resolve) => {
     const close = (): void => {
       app.stop();
       resolve();
@@ -87,12 +90,23 @@ async function serve(options: Parsed): Promise<void> {
     process.once("SIGINT", close);
     process.once("SIGTERM", close);
   });
+  if (options.open) {
+    void openSessionMap({ baseUrl: app.http.url, token: app.http.token, ...(options.browser ? { browser: options.browser } : {}) })
+      .then(() => console.log("SessionMap is visible in the browser."))
+      .catch((error) => console.error(error instanceof Error ? error.message : String(error)));
+  }
+  await closing;
 }
 
 async function openInstalled(options: Parsed): Promise<void> {
   const token = ensureCapabilityToken(options.stateDirectory).token;
   const port = options.port ?? DEFAULT_PORT;
-  await openBrowser(`http://127.0.0.1:${port}/#cap=${encodeURIComponent(token)}`);
+  await openSessionMap({
+    baseUrl: `http://127.0.0.1:${port}`,
+    token,
+    ...(options.browser ? { browser: options.browser } : {}),
+  });
+  console.log("SessionMap is visible in the browser.");
 }
 
 async function once(options: Parsed): Promise<void> {

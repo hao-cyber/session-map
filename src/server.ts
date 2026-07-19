@@ -14,6 +14,7 @@ import { ActionRouter } from "./actions.ts";
 import { AssetStore } from "./assets.ts";
 import { Logger } from "./logger.ts";
 import { SessionMonitor } from "./monitor.ts";
+import { verifyOpenTicket } from "./open.ts";
 import { detectEngines, engineAvailabilitySnapshot } from "./roll.ts";
 import { StateStore } from "./state.ts";
 import { TreeRuntime } from "./tree.ts";
@@ -169,6 +170,7 @@ export class SessionMapHttpServer {
   readonly logger: Logger;
   readonly token: string;
   readonly server: ReturnType<typeof Bun.serve>;
+  readonly openRequests = new Map<string, { expiresAt: number; exchanged: boolean; ready: boolean }>();
 
   constructor(readonly dependencies: ServerDependencies, options: ServerOptions) {
     this.hostname = options.hostname ?? DEFAULT_HOST;
@@ -192,8 +194,8 @@ export class SessionMapHttpServer {
     return `http://${this.hostname}:${this.server.port}`;
   }
 
-  browserUrl(): string {
-    return `${this.url}/#cap=${encodeURIComponent(this.token)}`;
+  browserUrl(ticket: string): string {
+    return `${this.url}/#open=${encodeURIComponent(ticket)}`;
   }
 
   stop(): void {
@@ -214,13 +216,20 @@ export class SessionMapHttpServer {
       }
       if (requestUrl.pathname === "/favicon.ico" && request.method === "GET") return new Response(null, { status: 204 });
       if (requestUrl.pathname.startsWith("/assets/") && request.method === "GET") {
-        return this.asset(requestUrl.pathname.slice("/assets/".length));
+        return this.asset(requestUrl.pathname.slice("/assets/".length), requestUrl.searchParams.get("v"));
       }
       if (!requestUrl.pathname.startsWith("/api/")) return text("not found", 404);
+      if (requestUrl.pathname === "/api/open/exchange") {
+        if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
+        return this.exchangeOpenTicket(await parseJsonObject(request, requestUrl));
+      }
       if (!secureEquals(request.headers.get("x-sessionmap-token") ?? "", this.token)) {
         return json({ error: "invalid capability token" }, 401);
       }
       if (request.method === "GET" && requestUrl.pathname === "/api/snapshot") return this.snapshot();
+      if (request.method === "GET" && requestUrl.pathname === "/api/open/status") {
+        return this.openStatus(request.headers.get("x-sessionmap-open-ticket") ?? "");
+      }
       if (request.method !== "POST") return json({ error: "method not allowed" }, 405);
       const body = await parseJsonObject(request, requestUrl);
       return await this.post(requestUrl.pathname, body);
@@ -262,12 +271,17 @@ export class SessionMapHttpServer {
     });
   }
 
-  asset(name: string): Response {
+  asset(name: string, suppliedVersion: string | null): Response {
     const asset = this.assets.get(name);
     if (!asset) return text("asset not found", 404);
-    return new Response(asset.body, {
+    const version = this.assets.version();
+    const versioned = suppliedVersion === version;
+    const body = asset.contentType.startsWith("text/css")
+      ? asset.body.replaceAll("__SESSIONMAP_ASSET_VERSION__", version)
+      : asset.body;
+    return new Response(body, {
       headers: {
-        "Cache-Control": this.assets.development ? "no-store" : "public, max-age=31536000, immutable",
+        "Cache-Control": this.assets.development || !versioned ? "no-store" : "public, max-age=31536000, immutable",
         "Content-Type": asset.contentType,
         "Referrer-Policy": "no-referrer",
         "X-Content-Type-Options": "nosniff",
@@ -291,7 +305,41 @@ export class SessionMapHttpServer {
     });
   }
 
+  registerOpenTicket(ticket: string): { id: string; expiresAt: number } {
+    const now = Date.now();
+    for (const [id, request] of this.openRequests) {
+      if (request.expiresAt < now) this.openRequests.delete(id);
+    }
+    const verified = verifyOpenTicket(this.token, ticket, now);
+    if (!verified) throw new HttpError(401, "invalid or expired open ticket");
+    if (!this.openRequests.has(verified.id)) {
+      this.openRequests.set(verified.id, { expiresAt: verified.expiresAt, exchanged: false, ready: false });
+    }
+    return verified;
+  }
+
+  openStatus(ticket: string): Response {
+    const verified = this.registerOpenTicket(ticket);
+    return json({ openId: verified.id, ready: this.openRequests.get(verified.id)?.ready === true });
+  }
+
+  exchangeOpenTicket(body: Record<string, unknown>): Response {
+    if (typeof body.ticket !== "string") throw new HttpError(400, "open ticket is required");
+    const verified = this.registerOpenTicket(body.ticket);
+    const request = this.openRequests.get(verified.id)!;
+    if (request.exchanged) throw new HttpError(409, "open ticket has already been used");
+    request.exchanged = true;
+    return json({ token: this.token, openId: verified.id, expiresAt: verified.expiresAt });
+  }
+
   async post(path: string, body: Record<string, unknown>): Promise<Response> {
+    if (path === "/api/open/ready") {
+      if (typeof body.openId !== "string") throw new HttpError(400, "openId is required");
+      const request = this.openRequests.get(body.openId);
+      if (!request || request.expiresAt < Date.now()) throw new HttpError(404, "unknown or expired open request");
+      request.ready = true;
+      return json({ ok: true });
+    }
     if (path === "/api/jump") {
       if (typeof body.sessionId !== "string") throw new HttpError(400, "sessionId is required");
       const result = await this.dependencies.actions.jump(body.sessionId);

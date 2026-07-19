@@ -454,20 +454,20 @@ textarea:focus-visible,
   -webkit-mask: var(--icon) center / contain no-repeat;
 }
 
-.icon-archive { --icon: url("/assets/vendor/icons/archive.svg"); }
-.icon-check-circle-2 { --icon: url("/assets/vendor/icons/check-circle-2.svg"); }
-.icon-chevron-down { --icon: url("/assets/vendor/icons/chevron-down.svg"); }
-.icon-circle-alert { --icon: url("/assets/vendor/icons/circle-alert.svg"); }
-.icon-clock-3 { --icon: url("/assets/vendor/icons/clock-3.svg"); }
-.icon-crosshair { --icon: url("/assets/vendor/icons/crosshair.svg"); }
-.icon-git-branch { --icon: url("/assets/vendor/icons/git-branch.svg"); }
-.icon-message-circle { --icon: url("/assets/vendor/icons/message-circle.svg"); }
-.icon-moon { --icon: url("/assets/vendor/icons/moon.svg"); }
-.icon-play { --icon: url("/assets/vendor/icons/play.svg"); }
-.icon-rotate-ccw { --icon: url("/assets/vendor/icons/rotate-ccw.svg"); }
-.icon-send { --icon: url("/assets/vendor/icons/send.svg"); }
-.icon-x { --icon: url("/assets/vendor/icons/x.svg"); }
-.icon-zoom-in { --icon: url("/assets/vendor/icons/zoom-in.svg"); }
+.icon-archive { --icon: url("/assets/vendor/icons/archive.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-check-circle-2 { --icon: url("/assets/vendor/icons/check-circle-2.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-chevron-down { --icon: url("/assets/vendor/icons/chevron-down.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-circle-alert { --icon: url("/assets/vendor/icons/circle-alert.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-clock-3 { --icon: url("/assets/vendor/icons/clock-3.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-crosshair { --icon: url("/assets/vendor/icons/crosshair.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-git-branch { --icon: url("/assets/vendor/icons/git-branch.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-message-circle { --icon: url("/assets/vendor/icons/message-circle.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-moon { --icon: url("/assets/vendor/icons/moon.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-play { --icon: url("/assets/vendor/icons/play.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-rotate-ccw { --icon: url("/assets/vendor/icons/rotate-ccw.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-send { --icon: url("/assets/vendor/icons/send.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-x { --icon: url("/assets/vendor/icons/x.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
+.icon-zoom-in { --icon: url("/assets/vendor/icons/zoom-in.svg?v=__SESSIONMAP_ASSET_VERSION__"); }
 
 .loading-state {
   position: absolute;

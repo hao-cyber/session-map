@@ -141,9 +141,16 @@ Web 资产和受 capability 保护的 API；浏览器只持有读取与动作所
 
 ## 本地安全边界
 
-服务只绑定 `127.0.0.1`。根页面不包含 capability token；
-`sessionmap open` 通过 URL fragment 把 token 引导到当前 tab 的 `sessionStorage`，
-并立即从地址栏清除。所有 `/api/*` 都要求该 token。状态变更请求还必须满足：
+服务只绑定 `127.0.0.1`。根页面不包含 capability token。CLI 用状态目录中的私有
+capability 签发 30 秒 HMAC open ticket，只把 ticket 放入 URL fragment；页面立即清除
+fragment，通过同源 POST 一次性兑换当前 tab capability。服务记录本次 open id，页面
+完成首次 snapshot 与地图渲染后发送 ready，CLI 轮询到 ready 才报告成功。这样
+LaunchServices 的“已投递”不会再被误判为“用户已看到”。除 ticket 兑换入口外，所有
+`/api/*` 都要求长期 capability；ticket 不能替代普通 API 鉴权。状态变更请求还必须满足：
+
+Web 资产采用完整 bundle 内容版本。HTML、脚本、样式、vendor 和 CSS 图标引用共享该
+版本；只有 URL 版本与当前 bundle 匹配时才返回 immutable，固定旧 URL 一律 no-store。
+因此浏览器升级时不会把新启动脚本与旧 Maintrail/SessionMap 客户端拼成一个页面。
 
 - Origin 的 scheme/host/port 属于允许的 loopback 页面；
 - media type 严格解析为 `application/json`；

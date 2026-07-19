@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ActionRouter, codexHomeForTranscript, resumeCommand, shellQuote, validSessionId } from "../src/actions.ts";
 import { AssetStore } from "../src/assets.ts";
 import { SessionMonitor } from "../src/monitor.ts";
+import { createOpenTicket } from "../src/open.ts";
 import { matchOrcaSession, stripSpinner, type OrcaSnapshot } from "../src/orca.ts";
 import { activeSessionCount, buildNowItems, renderMarkdown } from "../src/render.ts";
 import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "../src/server.ts";
@@ -429,19 +430,80 @@ describe("local HTTP security boundary", () => {
     expect(await response.json()).toEqual({ ok: true, name: "SessionMap" });
   });
 
-  test("keeps the token out of the public root and bootstraps it only in a URL fragment", async () => {
+  test("keeps the capability out of the public root and uses a one-time open ticket", async () => {
     const { server, token } = await runningServer();
     const root = await fetch(server.url);
     const html = await root.text();
     expect(html).not.toContain(token);
-    expect(html).toContain("sessionmap.capability.v1");
+    expect(html).toContain("sessionmap.open-ticket.v1");
     expect(html).not.toContain("__SESSIONMAP_NONCE__");
     expect(root.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
-    const browserUrl = new URL(server.browserUrl());
-    expect(browserUrl.hash).toBe(`#cap=${token}`);
+    const openTicket = createOpenTicket(token);
+    const browserUrl = new URL(server.browserUrl(openTicket.ticket));
+    expect(browserUrl.hash).toBe(`#open=${openTicket.ticket}`);
+    expect(browserUrl.hash).not.toContain(token);
     expect(browserUrl.search).toBe("");
-    expect((await fetch(`${server.url}/assets/app.js`)).status).toBe(200);
+    const version = server.assets.version();
+    expect(html).toContain(`/assets/app.js?v=${version}`);
+    expect(html).toContain(`/assets/styles.css?v=${version}`);
+    const unversionedAsset = await fetch(`${server.url}/assets/app.js`);
+    expect(unversionedAsset.status).toBe(200);
+    expect(unversionedAsset.headers.get("cache-control")).toBe("no-store");
+    const versionedAsset = await fetch(`${server.url}/assets/app.js?v=${version}`);
+    expect(versionedAsset.status).toBe(200);
+    expect(versionedAsset.headers.get("cache-control")).toContain("immutable");
+    const styles = await (await fetch(`${server.url}/assets/styles.css?v=${version}`)).text();
+    expect(styles).toContain(`archive.svg?v=${version}`);
+    expect(styles).not.toContain("__SESSIONMAP_ASSET_VERSION__");
     expect((await fetch(`${server.url}/assets/unknown.js`)).status).toBe(404);
+  });
+
+  test("exchanges an open ticket once and acknowledges the first rendered frame", async () => {
+    const { server, token } = await runningServer();
+    const openTicket = createOpenTicket(token);
+    const statusHeaders = {
+      "X-SessionMap-Token": token,
+      "X-SessionMap-Open-Ticket": openTicket.ticket,
+    };
+    const initial = await fetch(`${server.url}/api/open/status`, { headers: statusHeaders });
+    expect(initial.status).toBe(200);
+    expect(await initial.json()).toMatchObject({ openId: openTicket.id, ready: false });
+
+    const exchangeHeaders = { Origin: server.url, "Content-Type": "application/json" };
+    const exchanged = await fetch(`${server.url}/api/open/exchange`, {
+      method: "POST",
+      headers: exchangeHeaders,
+      body: JSON.stringify({ ticket: openTicket.ticket }),
+    });
+    expect(exchanged.status).toBe(200);
+    expect(await exchanged.json()).toEqual({ token, openId: openTicket.id, expiresAt: openTicket.expiresAt });
+    expect((await fetch(`${server.url}/api/open/exchange`, {
+      method: "POST",
+      headers: exchangeHeaders,
+      body: JSON.stringify({ ticket: openTicket.ticket }),
+    })).status).toBe(409);
+
+    const ready = await fetch(`${server.url}/api/open/ready`, {
+      method: "POST",
+      headers: { "X-SessionMap-Token": token, Origin: server.url, "Content-Type": "application/json" },
+      body: JSON.stringify({ openId: openTicket.id }),
+    });
+    expect(ready.status).toBe(200);
+    expect(await (await fetch(`${server.url}/api/open/status`, { headers: statusHeaders })).json()).toMatchObject({ ready: true });
+  });
+
+  test("rejects forged open tickets and cross-origin exchange", async () => {
+    const { server, token } = await runningServer();
+    const openTicket = createOpenTicket(token);
+    const forged = `${openTicket.ticket.slice(0, -1)}x`;
+    expect((await fetch(`${server.url}/api/open/status`, {
+      headers: { "X-SessionMap-Token": token, "X-SessionMap-Open-Ticket": forged },
+    })).status).toBe(401);
+    expect((await fetch(`${server.url}/api/open/exchange`, {
+      method: "POST",
+      headers: { Origin: "http://evil.example", "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket: openTicket.ticket }),
+    })).status).toBe(403);
   });
 
   test("rejects evil origins, wrong media types, and non-object JSON", async () => {

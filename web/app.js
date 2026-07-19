@@ -4,9 +4,10 @@
   const POLL_MS = 4_000;
   const DRAG_THRESHOLD = 5;
   const SESSION_CLICK_DELAY_MS = 260;
-  const API_HEADERS = {
-    "X-SessionMap-Token": window.SESSIONMAP_TOKEN,
-  };
+  const capabilityKey = "sessionmap.capability.v1";
+  const openTicketKey = "sessionmap.open-ticket.v1";
+  const openIdKey = "sessionmap.open-id.v1";
+  const openExpiryKey = "sessionmap.open-expiry.v1";
   const manualFoldKey = "sessionmap.manual-fold.v1";
   const legacyManualFoldKey = "maintrail.manual-fold.v1";
 
@@ -87,8 +88,64 @@
     const type = response.headers.get("content-type") || "";
     if (type.includes("application/json")) payload = await response.json();
     else if (!response.ok) payload = { error: await response.text() };
-    if (!response.ok) throw new Error(payload?.error || `请求失败 (${response.status})`);
+    if (!response.ok) {
+      const error = new Error(payload?.error || `请求失败 (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
     return payload;
+  }
+
+  async function exchangeOpenTicket() {
+    const ticket = window.SESSIONMAP_OPEN_TICKET;
+    if (!ticket) return;
+    const response = await fetch("/api/open/exchange", {
+      method: "POST",
+      cache: "no-store",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket }),
+    });
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) {
+      const error = new Error(payload?.error || `打开凭据兑换失败 (${response.status})`);
+      error.status = response.status;
+      throw error;
+    }
+    if (!/^[A-Za-z0-9_-]{43,128}$/.test(payload?.token || "") ||
+        !/^[A-Za-z0-9_-]{24}$/.test(payload?.openId || "") ||
+        !Number.isSafeInteger(payload?.expiresAt)) {
+      throw new Error("本地服务返回了无效的打开凭据");
+    }
+    window.SESSIONMAP_TOKEN = payload.token;
+    window.SESSIONMAP_OPEN_ID = payload.openId;
+    window.SESSIONMAP_OPEN_EXPIRY = payload.expiresAt;
+    sessionStorage.setItem(capabilityKey, payload.token);
+    sessionStorage.setItem(openIdKey, payload.openId);
+    sessionStorage.setItem(openExpiryKey, String(payload.expiresAt));
+    sessionStorage.removeItem(openTicketKey);
+    window.SESSIONMAP_OPEN_TICKET = "";
+  }
+
+  async function acknowledgeOpen() {
+    const openId = window.SESSIONMAP_OPEN_ID;
+    if (!openId) return;
+    try {
+      await post("/api/open/ready", { openId });
+      sessionStorage.removeItem(openIdKey);
+      sessionStorage.removeItem(openExpiryKey);
+      window.SESSIONMAP_OPEN_ID = "";
+      window.SESSIONMAP_OPEN_EXPIRY = 0;
+    } catch {
+      // A service restart can race the first frame. Keep the id and retry
+      // after the next successful snapshot while the CLI is still waiting.
+      if (Date.now() > Number(window.SESSIONMAP_OPEN_EXPIRY || 0)) {
+        sessionStorage.removeItem(openIdKey);
+        sessionStorage.removeItem(openExpiryKey);
+        window.SESSIONMAP_OPEN_ID = "";
+        window.SESSIONMAP_OPEN_EXPIRY = 0;
+      }
+    }
   }
 
   function toast(message, action) {
@@ -679,6 +736,18 @@
 
   window.addEventListener("hashchange", () => {
     if (suppressHash) return;
+    const fragment = new URLSearchParams(location.hash.slice(1));
+    const openTicket = fragment.get("open");
+    if (openTicket && /^[A-Za-z0-9_.-]{64,512}$/.test(openTicket)) {
+      sessionStorage.setItem(openTicketKey, openTicket);
+      sessionStorage.removeItem(openIdKey);
+      sessionStorage.removeItem(openExpiryKey);
+      fragment.delete("open");
+      const rest = fragment.toString();
+      history.replaceState(null, "", `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`);
+      location.reload();
+      return;
+    }
     const match = location.hash.match(/^#session=([^&]+)$/);
     if (match) jump(decodeURIComponent(match[1]), true);
   });
@@ -692,7 +761,7 @@
   });
 
   async function poll(force = false) {
-    if (polling) return;
+    if (polling || !window.SESSIONMAP_TOKEN) return false;
     polling = true;
     try {
       const next = await api("/api/snapshot");
@@ -714,16 +783,39 @@
         renderChrome(next);
         snapshot = next;
       }
+      await acknowledgeOpen();
+      return true;
     } catch (error) {
+      if (error?.status === 401) {
+        sessionStorage.removeItem(capabilityKey);
+        sessionStorage.removeItem(openIdKey);
+        sessionStorage.removeItem(openExpiryKey);
+        window.SESSIONMAP_TOKEN = "";
+        window.SESSIONMAP_OPEN_ID = "";
+        window.SESSIONMAP_OPEN_EXPIRY = 0;
+        statusLine.textContent = "访问凭据已失效 · 请重新运行 sessionmap open";
+        loading.querySelector("span:last-child").textContent = "重新授权后会回到同一棵思维树";
+        return false;
+      }
       statusLine.textContent = `暂时无法刷新 · ${error.message || error}`;
       // Keep the last successful tree and revision. The next poll retries it.
       if (seenRevision < 0) loading.querySelector("span:last-child").textContent = "等待本地服务恢复";
+      return false;
     } finally {
       polling = false;
     }
   }
 
-  function boot() {
+  async function boot() {
+    try {
+      await exchangeOpenTicket();
+    } catch (error) {
+      sessionStorage.removeItem(openTicketKey);
+      window.SESSIONMAP_OPEN_TICKET = "";
+      statusLine.textContent = "打开凭据已失效 · 请重新运行 sessionmap open";
+      loading.querySelector("span:last-child").textContent = error.message || String(error);
+      return;
+    }
     if (!window.SESSIONMAP_TOKEN) {
       statusLine.textContent = "请运行 sessionmap open 安全打开本地页面";
       loading.querySelector("span:last-child").textContent = "此页面没有本地访问凭据";
@@ -735,13 +827,11 @@
     transformer = new window.markmap.Transformer();
     window.SESSIONMAP_READY = true;
     sessionStorage.removeItem("sessionmap.asset-reload");
-    poll(true);
+    await poll(true);
     window.setInterval(() => poll(false), POLL_MS);
   }
 
-  try {
-    boot();
-  } catch (error) {
+  void boot().catch((error) => {
     statusLine.textContent = error.message || String(error);
-  }
+  });
 })();

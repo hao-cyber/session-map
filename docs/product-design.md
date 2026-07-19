@@ -99,7 +99,9 @@ Session 对话记录
 正式界面：它承载完整思维地图、状态、Fit、归档、撤销、跳转和恢复动作。
 
 - 页面由回环 Bun 服务提供，默认不依赖公网、云账户或远程静态资产。
-- 浏览器承担跨平台展示，不复制状态，也不在客户端重建业务模型。
+- 浏览器承担跨平台展示，不复制状态，也不在客户端重建业务模型。读取层只依赖标准
+  URL fragment、Fetch 与 sessionStorage，不得绑定 Chrome、Safari 或某个 profile；
+  默认浏览器和用户明确选择的任意现代浏览器必须进入同一协议。
 - 界面必须使用足够大的稳定视窗保护空间记忆，不能退化成狭窄弹层或活动列表。
 - “网页天然多端”只描述客户端材料；在设计远程认证和加密同步前，服务仍只绑定本机。
 
@@ -109,7 +111,8 @@ Bun 编译的服务仍是唯一 runtime，负责监控 transcript、提取语义
 以及提供本地 UI。
 
 - 服务可前台运行，也可由用户显式安装为用户级 launch agent，不依赖浏览器 tab 存活。
-- `sessionmap open` 打开带一次性 fragment 引导的本地页面；页面不持久化第二份状态。
+- `sessionmap open` 打开带短期一次性 ticket fragment 的本地页面；页面兑换当前 tab
+  capability、完成首次快照与地图渲染后回执。只有收到回执，CLI 才能宣布打开成功。
 - 关闭浏览器不会清空、重建或遗失任何对象。
 
 ## 6. 信息架构
@@ -278,8 +281,11 @@ SessionMap 改名迁移遵循：
 - Transcript 只作为 append-only 输入，永远不修改。
 - Runtime 资产全部 vendored；禁止 CDN、遥测和远程字体。
 - 服务只绑定 `127.0.0.1`。
-- 每个 `/api/*` 请求都需要私有 capability token；公开根页面不能泄露它。
-  `sessionmap open` 通过不发送给服务端的 URL fragment 引导当前 tab，随后立即清理。
+- 除短期一次性 open ticket 的同源兑换入口外，每个 `/api/*` 请求都需要私有
+  capability token；公开根页面不能泄露它。`sessionmap open` 只把签名 ticket 放在
+  不发送给服务端的 URL fragment 中，页面立即清理地址栏、兑换当前 tab capability，
+  并在首帧可用后回执。失效 capability 必须明确提示重新运行 `sessionmap open`，不能
+  伪装成临时刷新故障。
 - 写请求强制回环 Origin、严格 JSON media type、object body 和 64KiB 上限。
 - 跳转、恢复、归档、切换引擎和发话必须来自本地用户的明确动作。
 - 标签、session 标题、prompt、git 字段和模型输出都是不可信渲染输入，必须同时在
@@ -358,7 +364,9 @@ SessionMap 不是：
 9. 平移、缩放、Fit、resize 和刷新不改变用户披露状态；展开与折叠保持可预期且不破坏
    空间位置。
 10. 归档、撤销与恢复不改变底层对象恒存。
-11. standalone CLI 能安装或修复服务，`sessionmap open` 能进入授权后的同一棵树。
+11. standalone CLI 能安装或修复服务；`sessionmap open` 只有收到页面首帧回执才报告
+    成功，默认或显式选择的现代浏览器都能进入授权后的同一棵树，失效凭据给出可执行
+    的重新授权提示。
 12. 白色主题浏览器截图通过层级、对比度、溢出、命中区、减少动态效果与空/错状态检查。
 13. 回归测试、类型检查、Web 检查和编译 binary 冒烟全部通过。
 

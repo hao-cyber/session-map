@@ -60,4 +60,29 @@ describe("offline browser bundle", () => {
     expect(render).toContain('data-action="session"');
     expect(render).toContain('data-inline-action="jump-session"');
   });
+
+  test("bootstraps a one-time open ticket and gives expired credentials a recovery action", () => {
+    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
+    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const cli = readFileSync(resolve(root, "src", "cli.ts"), "utf8");
+    expect(html).toContain('fragment.get("open")');
+    expect(html).not.toContain('fragment.get("cap")');
+    expect(app).toContain('fetch("/api/open/exchange"');
+    expect(app).toContain('post("/api/open/ready"');
+    expect(app).toContain('headers.set("X-SessionMap-Token"');
+    expect(app).not.toContain("x-maintrail-token");
+    expect(app).toContain("访问凭据已失效 · 请重新运行 sessionmap open");
+    expect(cli).toContain("--browser APP");
+  });
+
+  test("versions every browser entry asset so immutable caches cannot mix releases", () => {
+    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
+    const styles = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) {
+      expect(match[1]).toContain("?v=__SESSIONMAP_ASSET_VERSION__");
+    }
+    for (const match of styles.matchAll(/url\("(\/assets\/[^"]+)"\)/g)) {
+      expect(match[1]).toContain("?v=__SESSIONMAP_ASSET_VERSION__");
+    }
+  });
 });

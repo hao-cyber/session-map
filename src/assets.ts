@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
+import { createHash } from "node:crypto";
 import INDEX_HTML_IMPORT from "../web/index.html" with { type: "text" };
 import APP_JS_IMPORT from "../web/app.js" with { type: "text" };
 import STYLES_CSS_IMPORT from "../web/styles.css" with { type: "text" };
@@ -69,6 +70,14 @@ const EMBEDDED: Record<string, Asset> = {
   "vendor/icons/zoom-in.svg": { body: ZOOM_SVG, contentType: "image/svg+xml", source: "vendor/icons/zoom-in.svg" },
 };
 
+const EMBEDDED_VERSION = (() => {
+  const hash = createHash("sha256");
+  for (const [name, asset] of Object.entries(EMBEDDED).sort(([left], [right]) => left.localeCompare(right))) {
+    hash.update(name).update("\0").update(asset.body).update("\0");
+  }
+  return hash.digest("hex").slice(0, 16);
+})();
+
 export class AssetStore {
   readonly webRoot: string;
   readonly development: boolean;
@@ -92,7 +101,7 @@ export class AssetStore {
     }
   }
 
-  version(): number {
+  version(): string {
     if (this.development) {
       let latest = 0;
       for (const asset of Object.values(EMBEDDED)) {
@@ -100,8 +109,8 @@ export class AssetStore {
           latest = Math.max(latest, statSync(join(this.webRoot, asset.source)).mtimeMs);
         } catch {}
       }
-      if (latest) return Math.floor(latest);
+      if (latest) return String(Math.floor(latest));
     }
-    return Math.abs(Number(Bun.hash(INDEX_HTML)));
+    return EMBEDDED_VERSION;
   }
 }

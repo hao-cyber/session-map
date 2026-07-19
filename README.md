@@ -30,7 +30,7 @@ git clone https://github.com/hao-cyber/sessionmap.git
 cd sessionmap
 bun install --frozen-lockfile
 bun run start
-# bun run start 会自动打开带本地 capability 的页面
+# bun run start 会用一次性 ticket 打开本地授权页面
 ```
 
 安装常驻后台并打开页面：
@@ -42,6 +42,11 @@ bun run build
 ```
 
 直接输入 `http://127.0.0.1:4317` 不会获得动作权限，这是刻意的安全边界。
+`sessionmap open` 会等到页面完成首次渲染才报告成功；系统仅接收 URL、但浏览器没有
+产生可见页面时，命令会明确失败。可用 `--browser chrome`、`--browser firefox` 或
+`--browser "Google Chrome"` 等选择任意已安装的 macOS 浏览器。
+Web bundle 使用内容版本隔离缓存；已有旧 Maintrail/SessionMap 缓存的浏览器 profile
+也会请求新资产，不需要用户手动清理缓存。
 
 生成一份不会读取真实 transcript 的演示树：
 
@@ -67,7 +72,8 @@ $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl
 
 ## 使用方式
 
-- 点击主线标题或带光标的 session 行：切回仍在运行的终端；终端已关则 resume。
+- 点击主线标题：切回该工作主线最合适的 session。
+- 单击 session 行展开或折叠脉络；双击或点击行尾“切回/恢复”进入对应终端。
 - `⌥` + 点击 session：通过 Orca 向该 session 发话。
 - 右键主线：立即归档；toast 中可以撤销。归档不是删除，后续 roll 仍会继续积累。
 - 双击画布空白或点击 **Fit**：恢复全景。
@@ -88,7 +94,9 @@ sessionmap status                # 查看持久状态摘要
 sessionmap demo                  # 写入演示状态
 ```
 
-按命令可使用 `--state-dir PATH`、`--port PORT`、`--no-open`、`--no-watch`。正式状态默认位于：
+按命令可使用 `--state-dir PATH`、`--port PORT`、`--no-open`、`--no-watch`；`open` 和
+`serve` 还支持 `--browser APP`，常用别名包括 chrome、safari、firefox、edge、brave、
+arc。正式状态默认位于：
 
 ```text
 ~/Library/Application Support/SessionMap/state.json
@@ -128,7 +136,7 @@ bun run build             # 单文件 sessionmap CLI
 `bun run build` 使用 Bun 生成当前平台的 standalone CLI。发布链不生成 macOS App、
 Homebrew Cask、Developer ID 签名或 Apple 公证产物。
 
-回归测试覆盖损坏状态修复、跨主线越权、reattach 只读边界、巨行与半行 JSONL、自噬排除、12 KiB 硬上限、at-most-once 崩溃窗口、命令转义、Markdown / HTML 注入、capability 鉴权与 Origin / media type 校验。
+回归测试覆盖损坏状态修复、跨主线越权、reattach 只读边界、巨行与半行 JSONL、自噬排除、12 KiB 硬上限、at-most-once 崩溃窗口、命令转义、Markdown / HTML 注入、capability 鉴权、open ticket/ready 回执与 Origin / media type 校验。
 
 贡献前请阅读 [贡献指南](CONTRIBUTING.md)。安全问题请按 [安全策略](SECURITY.md) 私下报告。
 

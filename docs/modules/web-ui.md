@@ -17,7 +17,13 @@
 - 第一层是主题，不得把 session 提升为一级对象。
 - Session 行同时保留整体主标题、最新有意义进展小标题、实时终端状态与动作入口。
 - 展开后呈现 2–6 个因果脉络；主题全貌是独立入口，不混进单个 session。
-- capability 从 URL fragment 进入 `sessionStorage`；公开根页面和日志不得泄露 token。
+- URL fragment 只接收短期一次性 open ticket；页面同源兑换 capability 后写入当前 tab
+  的 `sessionStorage` 并清理地址栏。公开根页面、URL、日志不得泄露长期 token。
+- 页面完成首次 snapshot 与地图渲染后才发送 open ready。401 清除当前 tab 的失效
+  capability 并明确提示运行 `sessionmap open`；不得把鉴权失败归为临时服务故障。
+- HTML 中每个 JS/CSS/vendor 入口都必须携带由完整嵌入式 Web bundle 内容生成的版本；
+  CSS 引用的图标同样带版本。只有匹配当前版本的资产响应可以使用 immutable 缓存，
+  无版本或版本不匹配的请求必须 `no-store`，避免新 HTML 与旧 JS 跨版本混装。
 - Web runtime 全部 vendored，不允许 CDN、远程字体、analytics 或 telemetry。
 
 ## 披露与视窗协议

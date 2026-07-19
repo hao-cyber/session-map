@@ -6,19 +6,27 @@
     <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#f7f7f8" />
     <title>SessionMap — agent thinking map</title>
-    <link rel="stylesheet" href="/assets/styles.css" />
+    <link rel="stylesheet" href="/assets/styles.css?v=__SESSIONMAP_ASSET_VERSION__" />
     <script nonce="__SESSIONMAP_NONCE__">
       (() => {
-        const key = "sessionmap.capability.v1";
+        const capabilityKey = "sessionmap.capability.v1";
+        const openTicketKey = "sessionmap.open-ticket.v1";
+        const openIdKey = "sessionmap.open-id.v1";
+        const openExpiryKey = "sessionmap.open-expiry.v1";
         const fragment = new URLSearchParams(location.hash.slice(1));
-        const supplied = fragment.get("cap");
-        if (supplied && /^[A-Za-z0-9_-]{43,128}$/.test(supplied)) {
-          sessionStorage.setItem(key, supplied);
-          fragment.delete("cap");
+        const supplied = fragment.get("open");
+        if (supplied && /^[A-Za-z0-9_.-]{64,512}$/.test(supplied)) {
+          sessionStorage.setItem(openTicketKey, supplied);
+          sessionStorage.removeItem(openIdKey);
+          sessionStorage.removeItem(openExpiryKey);
+          fragment.delete("open");
           const rest = fragment.toString();
           history.replaceState(null, "", `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`);
         }
-        window.SESSIONMAP_TOKEN = sessionStorage.getItem(key) || "";
+        window.SESSIONMAP_TOKEN = sessionStorage.getItem(capabilityKey) || "";
+        window.SESSIONMAP_OPEN_TICKET = sessionStorage.getItem(openTicketKey) || "";
+        window.SESSIONMAP_OPEN_ID = sessionStorage.getItem(openIdKey) || "";
+        window.SESSIONMAP_OPEN_EXPIRY = Number(sessionStorage.getItem(openExpiryKey) || "0");
       })();
       window.SESSIONMAP_ASSET_VERSION = "__SESSIONMAP_ASSET_VERSION__";
       window.addEventListener("load", () => {
@@ -32,10 +40,10 @@
         }, 1800);
       });
     </script>
-    <script defer src="/assets/vendor/d3.min.js"></script>
-    <script defer src="/assets/vendor/markmap-lib.js"></script>
-    <script defer src="/assets/vendor/markmap-view.js"></script>
-    <script defer src="/assets/app.js"></script>
+    <script defer src="/assets/vendor/d3.min.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
+    <script defer src="/assets/vendor/markmap-lib.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
+    <script defer src="/assets/vendor/markmap-view.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
+    <script defer src="/assets/app.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
   </head>
   <body>
     <header class="topbar" aria-label="SessionMap 状态栏">
