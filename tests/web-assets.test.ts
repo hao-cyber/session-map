@@ -43,7 +43,7 @@ describe("offline browser bundle", () => {
     expect(html).toContain("拖动画布");
     expect(html).toContain("滚轮缩放");
     expect(html).toContain("单击展开");
-    expect(html).toContain("双击切回");
+    expect(html).toContain("双击回到终端");
     expect(html).not.toContain("<span>全景</span><i></i><span>转折</span>");
   });
 
@@ -54,6 +54,11 @@ describe("offline browser bundle", () => {
     expect(app).toContain('row.dataset.action === "session"');
     expect(app).toContain("cancelSessionToggle(row.dataset.nodeId)");
     expect(app).toContain("await jump(row.dataset.sessionId)");
+    expect(app).toContain("const pendingJumps = new Set()");
+    expect(app).toContain("pendingJumps.has(sessionId)");
+    expect(app).toContain('button.dataset.pendingLabel || "正在前往…"');
+    expect(app).not.toContain('toast("正在切回 session…")');
+    expect(app).toContain("payload?.error || payload?.message");
     expect(app).toMatch(/svg\.addEventListener\("dblclick",[\s\S]*?\}, true\);/);
 
     const render = readFileSync(resolve(root, "src", "render.ts"), "utf8");

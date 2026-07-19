@@ -1,5 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mergeRuntimeState, parseLsofTranscriptProcesses, processForSession } from "../src/monitor.ts";
+import {
+  mergeRuntimeState,
+  parseLsofTranscriptProcesses,
+  processForSession,
+  readTranscriptProcess,
+  readTranscriptProcesses,
+} from "../src/monitor.ts";
 import { sessionRecord } from "./helpers.ts";
 
 describe("session monitor state merge", () => {
@@ -60,8 +66,47 @@ describe("session monitor state merge", () => {
       "n/Users/example/random.jsonl",
     ].join("\n");
     expect(parseLsofTranscriptProcesses(output)).toEqual([
-      { pid: 30538, tty: "/dev/ttys000", command: "open transcript", sessionId: "11111111-1111-4111-8111-111111111111" },
-      { pid: 41200, tty: "/dev/ttys004", command: "open transcript", sessionId: "22222222-2222-4222-8222-222222222222" },
+      { pid: 30538, tty: "/dev/ttys000", command: "open transcript", provider: "codex", sessionId: "11111111-1111-4111-8111-111111111111" },
+      { pid: 41200, tty: "/dev/ttys004", command: "open transcript", provider: "claude", sessionId: "22222222-2222-4222-8222-222222222222" },
     ]);
+  });
+
+  test("keeps Codex transcript evidence when no Claude process exists", async () => {
+    const calls: string[][] = [];
+    const codexOutput = [
+      "p33593",
+      "n/dev/ttys000",
+      "n/Users/example/.codex/sessions/2026/07/19/rollout-2026-07-19T21-56-38-33333333-3333-4333-8333-333333333333.jsonl",
+    ].join("\n");
+    const rows = await readTranscriptProcesses(async (command) => {
+      calls.push(command);
+      return command.at(-1) === "codex"
+        ? { ok: true, text: codexOutput }
+        : { ok: false, text: "" };
+    });
+
+    expect(calls.map((command) => command.at(-1))).toEqual(["codex", "claude"]);
+    expect(rows).toEqual([{
+      pid: 33593,
+      tty: "/dev/ttys000",
+      command: "open transcript",
+      provider: "codex",
+      sessionId: "33333333-3333-4333-8333-333333333333",
+    }]);
+  });
+
+  test("revalidates a cached PID against both provider and session transcript", async () => {
+    const output = [
+      "p4242",
+      "n/dev/ttys007",
+      "n/Users/example/.codex/sessions/2026/07/19/rollout-2026-07-19T15-51-02-same-session.jsonl",
+      "n/Users/example/.claude/projects/-Users-example-Code/same-session.jsonl",
+    ].join("\n");
+    const run = async () => ({ ok: true, text: output });
+
+    expect(await readTranscriptProcess({ id: "same-session", provider: "claude" }, 4242, run))
+      .toMatchObject({ pid: 4242, tty: "/dev/ttys007", provider: "claude" });
+    expect(await readTranscriptProcess({ id: "same-session", provider: "codex" }, 4242, run))
+      .toBeNull();
   });
 });

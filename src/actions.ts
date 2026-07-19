@@ -1,6 +1,12 @@
 import { existsSync } from "node:fs";
 import { matchOrcaSession, orcaPath, readOrcaSnapshot, runOrcaJson } from "./orca.ts";
-import { processForSession, readProcesses, readTranscriptProcesses, runText } from "./monitor.ts";
+import {
+  processForSession,
+  readProcesses,
+  readTranscriptProcess,
+  readTranscriptProcesses,
+  runText,
+} from "./monitor.ts";
 import { StateStore } from "./state.ts";
 import type { SessionRecord } from "./types.ts";
 import { controlSafe, isRecord, truncateChars } from "./utils.ts";
@@ -17,6 +23,7 @@ export interface ActionDependencies {
   readOrcaSnapshot: typeof readOrcaSnapshot;
   runOrcaJson: typeof runOrcaJson;
   readProcesses: typeof readProcesses;
+  readTranscriptProcess: typeof readTranscriptProcess;
   readTranscriptProcesses: typeof readTranscriptProcesses;
   runText: (command: string[], timeoutMs?: number) => Promise<TextResult>;
   runAppleScript: (script: string, args: string[]) => Promise<boolean>;
@@ -118,12 +125,14 @@ async function runAppleScript(script: string, args: string[]): Promise<boolean> 
 
 export class ActionRouter {
   readonly dependencies: ActionDependencies;
+  readonly #pendingJumps = new Map<string, Promise<ActionResult>>();
 
   constructor(readonly store: StateStore, dependencies: Partial<ActionDependencies> = {}) {
     this.dependencies = {
       readOrcaSnapshot,
       runOrcaJson,
       readProcesses,
+      readTranscriptProcess,
       readTranscriptProcesses,
       runText,
       runAppleScript,
@@ -138,33 +147,67 @@ export class ActionRouter {
     return session;
   }
 
-  async jump(id: string): Promise<ActionResult> {
+  jump(id: string): Promise<ActionResult> {
+    const pending = this.#pendingJumps.get(id);
+    if (pending) return pending;
+    const started = this.performJump(id).finally(() => {
+      if (this.#pendingJumps.get(id) === started) this.#pendingJumps.delete(id);
+    });
+    this.#pendingJumps.set(id, started);
+    return started;
+  }
+
+  private async focusProcess(pid: number, knownTTY = ""): Promise<boolean> {
+    const tty = knownTTY || await ttyForPid(pid, this.dependencies.runText) || "";
+    return Boolean(tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty]));
+  }
+
+  private async performJump(id: string): Promise<ActionResult> {
     try {
       const session = this.session(id);
-      const orca = await this.dependencies.readOrcaSnapshot();
-      const orcaMatch = orca.available ? matchOrcaSession(session, orca) : {};
-      if (orca.available) {
-        if (orcaMatch.terminal?.connected) {
-          await this.dependencies.runOrcaJson(["terminal", "switch", "--terminal", orcaMatch.terminal.handle]);
-          return { ok: true, mode: "orca-switch", message: "已切换到 Orca 终端" };
+
+      // A remembered Orca handle is already an exact identity. Let Orca
+      // validate it directly and only pay for full discovery if it is stale.
+      if (session.terminalHandle) {
+        try {
+          await this.dependencies.runOrcaJson(
+            ["terminal", "switch", "--terminal", session.terminalHandle],
+            1_200,
+          );
+          return { ok: true, mode: "orca-switch", message: "已回到 Orca 终端" };
+        } catch {
+          // A stale handle is only a cache miss; continue through safe discovery.
         }
       }
 
-      // A persisted PID is only a cache and may have been reused after the
-      // original agent exited. Re-resolve the process from exact live evidence
-      // on every click before deriving a TTY and focusing another application.
-      const [transcriptProcesses, processes] = await Promise.all([
+      // A persisted PID is only a lookup hint. Revalidate that exact process
+      // against its open provider transcript before using its TTY.
+      if (session.pid) {
+        const exact = await this.dependencies.readTranscriptProcess(session, session.pid).catch(() => null);
+        if (exact && await this.focusProcess(exact.pid, exact.tty)) {
+          return { ok: true, mode: "system-focus", message: "已回到原终端" };
+        }
+      }
+
+      // Cache misses refresh every independent evidence source in parallel so
+      // correctness checks do not become additive click latency.
+      const [orca, transcriptProcesses, processes] = await Promise.all([
+        this.dependencies.readOrcaSnapshot().catch(() => ({ available: false, agents: [], terminals: [] })),
         this.dependencies.readTranscriptProcesses().catch(() => []),
         this.dependencies.readProcesses().catch(() => []),
       ]);
-      const transcriptProcess = transcriptProcesses.find((candidate) => candidate.sessionId === session.id);
+      const orcaMatch = orca.available ? matchOrcaSession(session, orca) : {};
+      if (orcaMatch.terminal?.connected) {
+        await this.dependencies.runOrcaJson(["terminal", "switch", "--terminal", orcaMatch.terminal.handle]);
+        return { ok: true, mode: "orca-switch", message: "已回到 Orca 终端" };
+      }
+      const transcriptProcess = transcriptProcesses.find((candidate) =>
+        candidate.provider === session.provider && candidate.sessionId === session.id
+      );
       const process = transcriptProcess ?? processForSession(session, processes);
       const pid = process?.pid;
-      if (pid) {
-        const tty = await ttyForPid(pid, this.dependencies.runText);
-        if (tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
-          return { ok: true, mode: "system-focus", message: "已聚焦系统终端" };
-        }
+      if (pid && await this.focusProcess(pid, transcriptProcess?.tty)) {
+        return { ok: true, mode: "system-focus", message: "已回到原终端" };
       }
       if (orcaMatch.ambiguous) {
         return { ok: false, mode: "error", message: "发现多个相似 Orca 终端，已停止以免切错 session" };
@@ -195,16 +238,16 @@ export class ActionRouter {
               current.terminalOpen = true;
             });
           }
-          return { ok: true, mode: "orca-resume", message: "已在 Orca 中复活 session" };
+          return { ok: true, mode: "orca-resume", message: "已在 Orca 中恢复 session" };
         } catch {
           // The cwd may not be registered in Orca. Native fallback preserves the affordance.
         }
       }
       const command = resumeCommand(session);
       if (await this.dependencies.runAppleScript(RESUME_SCRIPT, [controlSafe(command)])) {
-        return { ok: true, mode: "system-resume", message: "已在系统终端复活 session" };
+        return { ok: true, mode: "system-resume", message: "已在系统终端恢复 session" };
       }
-      return { ok: false, mode: "error", message: "无法聚焦或复活该 session" };
+      return { ok: false, mode: "error", message: "无法回到或恢复该 session" };
     } catch (error) {
       return { ok: false, mode: "error", message: String(error) };
     }

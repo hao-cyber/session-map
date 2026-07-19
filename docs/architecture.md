@@ -121,13 +121,16 @@ resolved 和 dead 节点都是被明确记录过的历史判断，不会删除�
 
 Archive 只把主线移出当前阅读面，不停止 ingestion，不删除历史。恢复和 toast 撤销都操作同一个稳定 root id。
 
-Session 动作使用确定的降级阶梯：
+Session 动作使用确定的降级阶梯。持久 handle 和 PID 只作为候选提示，不是可信身份：
 
-1. Orca 中的现有 terminal；
-2. 按 TTY 精确匹配 iTerm2 / Terminal；
-3. 新建 terminal 执行 provider 的 resume 命令。
+1. 已知 Orca handle 由 Orca 切换命令现场验证；
+2. 已知 PID 由它只读打开的 provider + session transcript 现场验证，再按 TTY 精确匹配
+   iTerm2 / Terminal；
+3. 快速路径失效时，并行刷新 Orca、transcript 与进程证据，重新解析现有 terminal；
+4. 仍无活入口时，新建 terminal 执行 provider 的 resume 命令。
 
-无法完成时必须给出明确错误，不能让入口变成无反馈的假按钮。
+同一 session 的在途动作在浏览器和服务端同时去重。无法完成时必须给出明确错误，
+不能让入口变成无反馈的假按钮。
 
 ## 本地网页与服务
 

@@ -15,7 +15,8 @@ type ClaudeAgent = {
 };
 
 export type ProcessRow = { pid: number; tty: string; command: string };
-export type TranscriptProcessRow = ProcessRow & { sessionId: string };
+export type TranscriptProcessRow = ProcessRow & { sessionId: string; provider: SessionRecord["provider"] };
+type TextRunner = (command: string[], timeoutMs?: number) => Promise<{ ok: boolean; text: string }>;
 
 async function runText(command: string[], timeoutMs = 5_000): Promise<{ ok: boolean; text: string }> {
   try {
@@ -81,38 +82,59 @@ async function readProcesses(): Promise<ProcessRow[]> {
   return rows;
 }
 
-function sessionIdForOpenTranscript(path: string): string | null {
+function transcriptIdentity(path: string): Pick<TranscriptProcessRow, "provider" | "sessionId"> | null {
   if (!path.endsWith(".jsonl")) return null;
   const codex = path.match(/\/sessions\/\d{4}\/\d{2}\/\d{2}\/rollout-.+?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
-  if (codex?.[1]) return codex[1];
+  if (codex?.[1]) return { provider: "codex", sessionId: codex[1] };
   if (!path.includes("/.claude/projects/")) return null;
   const name = basename(path, ".jsonl");
-  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) ? name : null;
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name)
+    ? { provider: "claude", sessionId: name }
+    : null;
 }
 
 /** Parse one macOS lsof -Fpn stream into exact transcript-to-process links. */
 export function parseLsofTranscriptProcesses(output: string): TranscriptProcessRow[] {
-  type OpenProcess = { pid: number; tty: string; sessionIds: Set<string> };
+  type OpenProcess = {
+    pid: number;
+    tty: string;
+    transcripts: Map<string, Pick<TranscriptProcessRow, "provider" | "sessionId">>;
+  };
   const processes: OpenProcess[] = [];
   let current: OpenProcess | null = null;
   for (const line of output.split("\n")) {
     if (line.startsWith("p") && /^p\d+$/.test(line)) {
-      current = { pid: Number(line.slice(1)), tty: "", sessionIds: new Set() };
+      current = { pid: Number(line.slice(1)), tty: "", transcripts: new Map() };
       processes.push(current);
       continue;
     }
     if (!current || !line.startsWith("n")) continue;
     const name = line.slice(1);
     if (!current.tty && /^\/dev\/tty\w+$/.test(name)) current.tty = name;
-    const sessionId = sessionIdForOpenTranscript(name);
-    if (sessionId) current.sessionIds.add(sessionId);
+    const identity = transcriptIdentity(name);
+    if (identity) current.transcripts.set(`${identity.provider}:${identity.sessionId}`, identity);
   }
-  return processes.flatMap((process) => [...process.sessionIds].map((sessionId) => ({
+  return processes.flatMap((process) => [...process.transcripts.values()].map((identity) => ({
     pid: process.pid,
     tty: process.tty,
     command: "open transcript",
-    sessionId,
+    ...identity,
   })));
+}
+
+/** Revalidate one cached PID against the exact provider transcript it has open. */
+export async function readTranscriptProcess(
+  session: Pick<SessionRecord, "id" | "provider">,
+  pid: number,
+  run: TextRunner = runText,
+): Promise<TranscriptProcessRow | null> {
+  const lsof = "/usr/sbin/lsof";
+  if (!Number.isSafeInteger(pid) || pid <= 0 || !existsSync(lsof)) return null;
+  const result = await run([lsof, "-n", "-P", "-Fpn", "-p", String(pid)], 1_000);
+  if (!result.ok) return null;
+  return parseLsofTranscriptProcesses(result.text).find((candidate) =>
+    candidate.pid === pid && candidate.provider === session.provider && candidate.sessionId === session.id
+  ) ?? null;
 }
 
 /**
@@ -120,11 +142,17 @@ export function parseLsofTranscriptProcesses(output: string): TranscriptProcessR
  * providers keep their append-only transcript open, which gives us an exact,
  * read-only process link without cwd heuristics or Orca.
  */
-async function readTranscriptProcesses(): Promise<TranscriptProcessRow[]> {
+async function readTranscriptProcesses(run: TextRunner = runText): Promise<TranscriptProcessRow[]> {
   const lsof = "/usr/sbin/lsof";
   if (!existsSync(lsof)) return [];
-  const result = await runText([lsof, "-n", "-P", "-Fpn", "-c", "codex", "-c", "claude"], 5_000);
-  return result.ok ? parseLsofTranscriptProcesses(result.text) : [];
+  // lsof exits 1 when any combined -c selector has no match, even if another
+  // selector produced complete valid output. Query providers independently so
+  // a machine running only Codex or only Claude does not look fully closed.
+  const results = await Promise.all([
+    run([lsof, "-n", "-P", "-Fpn", "-c", "codex"], 5_000),
+    run([lsof, "-n", "-P", "-Fpn", "-c", "claude"], 5_000),
+  ]);
+  return results.flatMap((result) => result.ok ? parseLsofTranscriptProcesses(result.text) : []);
 }
 
 function mapAgentStatus(value: string, updatedAt: number, now: number): SessionStatus {
@@ -238,7 +266,9 @@ export class SessionMonitor {
         const claudeAgent = session.provider === "claude"
           ? claudeAgents.find((agent) => agent.id === session.id)
           : undefined;
-        const process = transcriptProcesses.find((candidate) => candidate.sessionId === session.id)
+        const process = transcriptProcesses.find((candidate) =>
+          candidate.provider === session.provider && candidate.sessionId === session.id
+        )
           ?? processForSession(session, processes);
         const terminal = orcaMatch.terminal;
         // Orca is an optional source, not an authority gate.  A locally

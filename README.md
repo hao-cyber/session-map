@@ -72,15 +72,15 @@ $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl
 
 ## 使用方式
 
-- 点击主线标题：切回该工作主线最合适的 session。
-- 单击 session 行展开或折叠脉络；双击或点击行尾“切回/恢复”进入对应终端。
+- 点击主线标题：回到该工作主线最合适的 session。
+- 单击 session 行展开或折叠脉络；双击或点击行尾“回到终端/恢复”进入对应终端。
 - `⌥` + 点击 session：通过 Orca 向该 session 发话。
 - 右键主线：立即归档；toast 中可以撤销。归档不是删除，后续 roll 仍会继续积累。
 - 双击画布空白或点击 **Fit**：恢复全景。
 - 点击结构行或 session 的“脉络”控件展开详情；选择会跨刷新保留。平移、缩放、Fit
   和窗口变化只调整视窗，不会替用户自动展开或折叠内容。
 
-有 Orca 时，SessionMap 会用最后一条用户消息匹配 `orca worktree ps`，再定位 pane 与 terminal handle，完成切换、复活或发话。没有 Orca 时，macOS 会按 TTY 精确聚焦 iTerm2 / Terminal，并在需要时打开新 Terminal 执行 resume；无 Orca 时不会注入键盘输入。
+SessionMap 会先现场验证已知 terminal handle 或 PID；快速路径失效时，才并行刷新 Orca、transcript 与进程证据。Orca 可用时会定位 pane 与 terminal handle，完成切换、恢复或发话；没有 Orca 时，macOS 会按 TTY 精确聚焦 iTerm2 / Terminal，并在需要时打开新 Terminal 执行 resume。无 Orca 时不会注入键盘输入。
 
 ## 命令行
 

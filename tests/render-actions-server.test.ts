@@ -131,9 +131,11 @@ describe("safe rendering and attention ordering", () => {
     expect(sessions[0]).toContain('data-action="session"');
     expect(sessions[0]).toContain('data-inline-action="toggle-context"');
     expect(sessions[0]).toContain('data-inline-action="jump-session"');
-    expect(sessions[0]).toContain(">切回</button>");
+    expect(sessions[0]).toContain(">回到终端</button>");
+    expect(sessions[0]).toContain('data-pending-label="回到中…"');
     expect(sessions[1]).toContain("复核发布流程");
     expect(sessions[1]).toContain(">恢复</button>");
+    expect(sessions[1]).toContain('data-pending-label="恢复中…"');
     expect(lines.indexOf(sessions[0]!)).toBeGreaterThan(topic);
     expect(lines.indexOf(sessions[1]!)).toBeLessThan(summary);
     expect(lines[summary]).toContain('data-default-fold="true"');
@@ -323,6 +325,7 @@ describe("action safety and Orca matching", () => {
       readOrcaSnapshot: async () => ({ available: false, agents: [], terminals: [] }),
       readTranscriptProcesses: async () => [{
         sessionId: session.id,
+        provider: session.provider,
         pid: 4242,
         tty: "/dev/ttys007",
         command: "open transcript",
@@ -338,6 +341,102 @@ describe("action safety and Orca matching", () => {
     expect(scripts).toHaveLength(1);
     expect(scripts[0]?.args).toEqual(["/dev/ttys007"]);
     expect(scripts[0]?.script).toContain("targetTTY");
+  });
+
+  test("uses an exact remembered Orca handle without full discovery", async () => {
+    const store = new StateStore(directory());
+    const session = { ...sessionRecord("fast-orca", process.cwd()), terminalHandle: "terminal-exact" };
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const commands: Array<{ args: string[]; timeout?: number }> = [];
+    let discoveryCalls = 0;
+    const actions = new ActionRouter(store, {
+      runOrcaJson: async (args, timeout) => {
+        commands.push({ args, ...(timeout === undefined ? {} : { timeout }) });
+        return {};
+      },
+      readOrcaSnapshot: async () => { discoveryCalls += 1; return { available: true, agents: [], terminals: [] }; },
+      readTranscriptProcesses: async () => { discoveryCalls += 1; return []; },
+      readProcesses: async () => { discoveryCalls += 1; return []; },
+    });
+
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "orca-switch" });
+    expect(commands).toEqual([{
+      args: ["terminal", "switch", "--terminal", "terminal-exact"],
+      timeout: 1_200,
+    }]);
+    expect(discoveryCalls).toBe(0);
+  });
+
+  test("revalidates a cached PID with one transcript lookup before focusing", async () => {
+    const store = new StateStore(directory());
+    const session = { ...sessionRecord("fast-system", process.cwd()), pid: 4242 };
+    await store.update((state) => { state.sessions[session.id] = session; });
+    let discoveryCalls = 0;
+    const scripts: string[][] = [];
+    const actions = new ActionRouter(store, {
+      readTranscriptProcess: async () => ({
+        sessionId: session.id,
+        provider: session.provider,
+        pid: session.pid!,
+        tty: "/dev/ttys007",
+        command: "open transcript",
+      }),
+      readOrcaSnapshot: async () => { discoveryCalls += 1; return { available: false, agents: [], terminals: [] }; },
+      readTranscriptProcesses: async () => { discoveryCalls += 1; return []; },
+      readProcesses: async () => { discoveryCalls += 1; return []; },
+      runAppleScript: async (_script, args) => { scripts.push(args); return true; },
+    });
+
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "system-focus" });
+    expect(scripts).toEqual([["/dev/ttys007"]]);
+    expect(discoveryCalls).toBe(0);
+  });
+
+  test("deduplicates concurrent jumps for the same session in the action layer", async () => {
+    const store = new StateStore(directory());
+    const session = { ...sessionRecord("one-jump", process.cwd()), terminalHandle: "terminal-exact" };
+    await store.update((state) => { state.sessions[session.id] = session; });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let switches = 0;
+    const actions = new ActionRouter(store, {
+      runOrcaJson: async () => { switches += 1; await gate; return {}; },
+    });
+
+    const first = actions.jump(session.id);
+    const second = actions.jump(session.id);
+    expect(second).toBe(first);
+    release();
+    expect(await first).toMatchObject({ ok: true, mode: "orca-switch" });
+    expect(switches).toBe(1);
+  });
+
+  test("starts every full-discovery source in parallel after fast paths miss", async () => {
+    const store = new StateStore(directory());
+    const session = sessionRecord("parallel-discovery", process.cwd());
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const started = new Set<string>();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const waitForGate = async (name: string) => {
+      started.add(name);
+      await gate;
+    };
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => {
+        await waitForGate("orca");
+        return { available: false, agents: [], terminals: [] };
+      },
+      readTranscriptProcesses: async () => { await waitForGate("transcript"); return []; },
+      readProcesses: async () => { await waitForGate("processes"); return []; },
+      runAppleScript: async () => true,
+    });
+
+    const jumped = actions.jump(session.id);
+    await Bun.sleep(0);
+    expect(started).toEqual(new Set(["orca", "transcript", "processes"]));
+    release();
+    expect(await jumped).toMatchObject({ ok: true, mode: "system-resume" });
   });
 
   test("never focuses a stale persisted PID without current session evidence", async () => {

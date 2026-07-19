@@ -142,7 +142,8 @@ function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
   const cursorLabel = session.cursor ? state.nodes[session.cursor]?.label : undefined;
   const progress = snapshot.progress || cursorLabel || "等待结构性进展";
   const trailCount = snapshot.trail.length;
-  const jumpLabel = session.status === "closed" ? "恢复" : "切回";
+  const jumpLabel = session.status === "closed" ? "恢复" : "回到终端";
+  const pendingLabel = session.status === "closed" ? "恢复中…" : "回到中…";
   const actionHint = trailCount ? `单击展开脉络 · 双击${jumpLabel}` : `双击${jumpLabel}`;
   return [
     `<span class="fm-line fm-session ${status.className}" data-kind="session" data-node-id="${escapeHtml(sessionPresentationId(session))}"${trailCount ? ' data-default-fold="true"' : ""} data-action="session" data-session-id="${escapeHtml(session.id)}" title="${escapeMarkdown(`${session.provider} · ${session.title} · ${actionHint}`)}">`,
@@ -158,7 +159,7 @@ function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
     trailCount
       ? `<button type="button" class="session-context-toggle" data-inline-action="toggle-context" aria-label="展开 ${trailCount} 条 session 脉络">脉络 ${trailCount}</button>`
       : "",
-    `<button type="button" class="session-jump-action" data-inline-action="jump-session" aria-label="${jumpLabel} ${escapeMarkdown(snapshot.summary || session.title)}">${jumpLabel}</button>`,
+    `<button type="button" class="session-jump-action" data-inline-action="jump-session" data-idle-label="${jumpLabel}" data-pending-label="${pendingLabel}" aria-label="${jumpLabel} ${escapeMarkdown(snapshot.summary || session.title)}">${jumpLabel}</button>`,
     "</span>",
   ].join("");
 }

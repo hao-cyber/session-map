@@ -41,6 +41,7 @@
   let resizeTimer = 0;
   let manualFold = loadManualFold();
   const pendingSessionClicks = new Map();
+  const pendingJumps = new Set();
 
   function loadManualFold() {
     try {
@@ -89,7 +90,7 @@
     if (type.includes("application/json")) payload = await response.json();
     else if (!response.ok) payload = { error: await response.text() };
     if (!response.ok) {
-      const error = new Error(payload?.error || `请求失败 (${response.status})`);
+      const error = new Error(payload?.error || payload?.message || `请求失败 (${response.status})`);
       error.status = response.status;
       throw error;
     }
@@ -335,6 +336,7 @@
         contextToggle.setAttribute("aria-label", `${expanded ? "折叠" : "展开"} session 脉络`);
       }
     }
+    for (const sessionId of pendingJumps) setJumpPending(sessionId, true);
   }
 
   window.SESSIONMAP_FIT = () => mm?.fit(1.12);
@@ -458,32 +460,39 @@
     return api(path, { method: "POST", body: JSON.stringify(value) });
   }
 
+  function setJumpPending(sessionId, pending) {
+    const rows = [...svg.querySelectorAll(".fm-line[data-session-id]")]
+      .filter((row) => row.dataset.sessionId === sessionId);
+    for (const row of rows) {
+      row.classList.toggle("is-jumping", pending);
+      if (pending) row.setAttribute("aria-busy", "true");
+      else row.removeAttribute("aria-busy");
+      for (const button of row.querySelectorAll(".session-jump-action")) {
+        button.disabled = pending;
+        button.textContent = pending
+          ? button.dataset.pendingLabel || "正在前往…"
+          : button.dataset.idleLabel || "回到终端";
+      }
+    }
+  }
+
   async function jump(sessionId, fromHash = false) {
-    if (!sessionId) return;
+    if (!sessionId || pendingJumps.has(sessionId)) return;
+    pendingJumps.add(sessionId);
     if (!fromHash) {
       suppressHash = true;
       history.replaceState(null, "", `#session=${encodeURIComponent(sessionId)}`);
       queueMicrotask(() => { suppressHash = false; });
     }
-    const rows = [...svg.querySelectorAll(".fm-line[data-session-id]")]
-      .filter((row) => row.dataset.sessionId === sessionId);
-    for (const row of rows) {
-      row.classList.add("is-jumping");
-      row.setAttribute("aria-busy", "true");
-    }
-    const pending = toast("正在切回 session…");
+    setJumpPending(sessionId, true);
     try {
       const result = await post("/api/jump", { sessionId });
-      pending.remove();
-      toast(result.message || "已切回 session");
+      toast(result.message || "已回到 session");
     } catch (error) {
-      pending.remove();
       toast(error.message || String(error));
     } finally {
-      for (const row of rows) {
-        row.classList.remove("is-jumping");
-        row.removeAttribute("aria-busy");
-      }
+      pendingJumps.delete(sessionId);
+      setJumpPending(sessionId, false);
     }
   }
 
