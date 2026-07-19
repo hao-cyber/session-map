@@ -69,18 +69,11 @@
 
     <section id="now-bar" class="now-bar" aria-label="现在该看哪"></section>
 
-    <main id="map-shell">
-      <svg id="mindmap" role="tree" aria-label="SessionMap 思维树"></svg>
+    <main id="map-shell" tabindex="-1">
+      <div id="directory" class="directory" role="region" aria-label="主题与 Session 目录"></div>
       <div id="loading" class="loading-state">
         <span class="busy-dot"></span>
-        <span>重建思维路径</span>
-      </div>
-      <button id="fit-button" class="fit-button" type="button" title="适合视图">
-        <span class="icon icon-zoom-in" aria-hidden="true"></span>
-        <span>Fit</span>
-      </button>
-      <div class="lod-legend" aria-hidden="true">
-        <span>拖动画布</span><i></i><span>滚轮缩放</span><i></i><span>单击展开</span><i></i><span>双击回到终端</span>
+        <span>重建主题与 Session 目录</span>
       </div>
     </main>
 

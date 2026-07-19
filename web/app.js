@@ -11,7 +11,8 @@
   const manualFoldKey = "sessionmap.manual-fold.v1";
   const legacyManualFoldKey = "maintrail.manual-fold.v1";
 
-  const svg = document.getElementById("mindmap");
+  const mapShell = document.getElementById("map-shell");
+  const directory = document.getElementById("directory");
   const loading = document.getElementById("loading");
   const nowBar = document.getElementById("now-bar");
   const statusLine = document.getElementById("status-line");
@@ -28,18 +29,14 @@
   const toastRegion = document.getElementById("toast-region");
 
   let transformer;
-  let mm;
   let snapshot;
   let seenRevision = -1;
   let seenAssetVersion = String(window.SESSIONMAP_ASSET_VERSION || "");
   let polling = false;
-  let firstRender = true;
   let saySessionId = "";
-  let pointerStart = null;
-  let pointerDragged = false;
   let suppressHash = false;
-  let resizeTimer = 0;
   let manualFold = loadManualFold();
+  const overviewMaps = new Map();
   const pendingSessionClicks = new Map();
   const pendingJumps = new Set();
 
@@ -197,35 +194,13 @@
     for (const child of node.children || []) walk(child, visit, depth + 1);
   }
 
-  function dataById(id) {
-    let found = null;
-    walk(mm?.state?.data, (node) => {
-      if (!found && extractNodeId(node) === id) found = node;
-    });
-    return found;
-  }
-
-  function rememberFoldState() {
-    const folds = new Map();
-    walk(mm?.state?.data, (node) => {
-      const id = extractNodeId(node);
-      if (id) folds.set(id, Boolean(node.payload?.fold));
-    });
-    return folds;
-  }
-
-  function applyRememberedFolds(root, remembered) {
+  function applyManualFolds(root) {
     walk(root, (node, depth) => {
       const id = extractNodeId(node);
       if (!id) return;
       if (Object.prototype.hasOwnProperty.call(manualFold, id)) {
         node.payload = node.payload || {};
         node.payload.fold = Boolean(manualFold[id]);
-        return;
-      }
-      if (remembered.has(id)) {
-        node.payload = node.payload || {};
-        node.payload.fold = remembered.get(id);
         return;
       }
       const content = String(node.content || node.payload?.content || "");
@@ -236,69 +211,48 @@
     });
   }
 
-  function centerAnchor(allowedIds) {
-    if (!mm) return null;
-    const box = svg.getBoundingClientRect();
-    const cx = box.left + box.width / 2;
-    const cy = box.top + box.height / 2;
+  function contentElement(data) {
+    const template = document.createElement("template");
+    template.innerHTML = String(data?.content || data?.payload?.content || "").trim();
+    return template.content.firstElementChild;
+  }
+
+  function directoryAnchor() {
+    const box = mapShell.getBoundingClientRect();
+    const targetY = box.top + Math.min(96, box.height * 0.2);
     let nearest = null;
     let distance = Number.POSITIVE_INFINITY;
-    for (const group of svg.querySelectorAll("g.markmap-node")) {
-      const line = group.querySelector(".fm-line[data-node-id], [data-node-id]");
-      const id = line?.dataset.nodeId;
+    for (const row of directory.querySelectorAll(".fm-mainline[data-node-id], .fm-session[data-node-id]")) {
+      const id = row.dataset.nodeId;
       if (!id) continue;
-      if (allowedIds && !allowedIds.has(id)) continue;
-      const rect = group.getBoundingClientRect();
-      const x = rect.left + rect.width / 2;
-      const y = rect.top + rect.height / 2;
-      const next = Math.hypot(x - cx, y - cy);
+      const rect = row.getBoundingClientRect();
+      if (rect.bottom < box.top || rect.top > box.bottom) continue;
+      const y = rect.top;
+      const next = Math.abs(y - targetY);
       if (next < distance) {
         distance = next;
-        nearest = { id, x, y };
+        nearest = { id, y };
       }
     }
     return nearest;
   }
 
-  function pinAnchor(anchor) {
-    if (!anchor || !mm) return;
-    const currentData = dataById(anchor.id);
-    const candidates = [...svg.querySelectorAll("g.markmap-node")].filter((group) =>
-      group.querySelector(`[data-node-id="${CSS.escape(anchor.id)}"]`),
-    );
-    // Markmap keys transitions by structural path. A sibling removal can leave
-    // an exiting DOM duplicate with the same stable SessionMap id for one frame.
-    const element = candidates.find((group) => group.__data__ === currentData) ?? candidates.at(-1);
-    if (!element) return;
-    const rect = element.getBoundingClientRect();
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const transform = window.d3.zoomTransform(svg);
-    const adjusted = window.d3.zoomIdentity
-      .translate(transform.x + anchor.x - x, transform.y + anchor.y - y)
-      .scale(transform.k);
-    mm.svg.call(mm.zoom.transform, adjusted);
+  function pinDirectoryAnchor(anchor) {
+    if (!anchor) return;
+    const row = directory.querySelector(`[data-node-id="${CSS.escape(anchor.id)}"]`);
+    if (!row) return;
+    mapShell.scrollTop += row.getBoundingClientRect().top - anchor.y;
   }
 
   function afterLayout() {
     return new Promise((resolve) => window.setTimeout(resolve, 350));
   }
 
-  async function renderMap(markdown) {
-    const remembered = rememberFoldState();
-    const transformed = transformer.transform(markdown);
-    const nextIds = new Set();
-    walk(transformed.root, (node) => {
-      const id = extractNodeId(node);
-      if (id) nextIds.add(id);
-    });
-    const anchor = centerAnchor(nextIds);
-    applyRememberedFolds(transformed.root, remembered);
-    if (!mm) {
-      mm = window.markmap.Markmap.create(svg, {
+  function markmapOptions() {
+    return {
         autoFit: false,
         color: () => "#aab2be",
-        duration: 320,
+        duration: 240,
         embedGlobalCSS: true,
         fitRatio: 0.9,
         initialExpandLevel: -1,
@@ -313,43 +267,141 @@
         spacingVertical: 7,
         toggleRecursively: false,
         zoom: true,
-      });
-    }
-    await mm.setData(transformed.root);
-    decorateInteractiveRows();
-    if (firstRender) {
-      // setData resolves before Markmap's enter transition finishes. Fitting
-      // against that intermediate geometry can open on a clipped, overlapping
-      // tree — exactly when the user most needs a stable three-second view.
-      await afterLayout();
-      await mm.fit(1.12);
-      firstRender = false;
-    } else {
-      await afterLayout();
-      pinAnchor(anchor);
-    }
-    loading.hidden = true;
+      };
   }
 
-  function decorateInteractiveRows() {
-    for (const row of svg.querySelectorAll(".fm-line")) {
+  function decorateRows(scope = directory) {
+    for (const row of scope.querySelectorAll(".fm-line")) {
       const action = row.dataset.action;
-      if (action === "jump" || action === "toggle") {
+      if (action === "jump" || action === "toggle" || action === "session") {
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
-      }
-      const contextToggle = row.querySelector('[data-inline-action="toggle-context"]');
-      if (contextToggle) {
-        const data = dataById(row.dataset.nodeId);
-        const expanded = !Boolean(data?.payload?.fold);
-        contextToggle.setAttribute("aria-expanded", String(expanded));
-        contextToggle.setAttribute("aria-label", `${expanded ? "折叠" : "展开"} session 脉络`);
       }
     }
     for (const sessionId of pendingJumps) setJumpPending(sessionId, true);
   }
 
-  window.SESSIONMAP_FIT = () => mm?.fit(1.12);
+  function syncDisclosureControl(row, expanded) {
+    const control = row.querySelector('[data-inline-action="toggle-context"]');
+    if (!control) return;
+    control.textContent = expanded ? "收起" : "脉络";
+    control.setAttribute("aria-expanded", String(expanded));
+    control.setAttribute("aria-label", `${expanded ? "收起" : "展开"} session 脉络`);
+  }
+
+  async function mountOverview(container, data, id) {
+    if (overviewMaps.has(id)) return overviewMaps.get(id);
+    data.payload = data.payload || {};
+    data.payload.fold = false;
+    const svg = container.querySelector("svg");
+    const map = window.markmap.Markmap.create(svg, markmapOptions());
+    await map.setData(data);
+    overviewMaps.set(id, map);
+    decorateRows(svg);
+    bindOverviewEvents(svg, map);
+    await afterLayout();
+    await map.fit(1.08);
+    return map;
+  }
+
+  function buildSession(data) {
+    const row = contentElement(data);
+    if (!row) return null;
+    const entry = document.createElement("article");
+    entry.className = "session-entry";
+    entry.dataset.nodeId = row.dataset.nodeId || "";
+    entry.append(row);
+    const trail = document.createElement("div");
+    trail.className = "session-trail";
+    trail.setAttribute("role", "group");
+    for (const child of data.children || []) {
+      const item = contentElement(child);
+      if (item) trail.append(item);
+    }
+    const folded = Object.prototype.hasOwnProperty.call(manualFold, row.dataset.nodeId)
+      ? Boolean(manualFold[row.dataset.nodeId])
+      : true;
+    trail.hidden = folded;
+    syncDisclosureControl(row, !folded);
+    if (trail.childElementCount) entry.append(trail);
+    return entry;
+  }
+
+  function buildOverview(data) {
+    const row = contentElement(data);
+    if (!row) return null;
+    const block = document.createElement("section");
+    block.className = "topic-overview";
+    block.dataset.nodeId = row.dataset.nodeId || "";
+    block._overviewData = data;
+    const canvas = document.createElement("div");
+    canvas.className = "overview-canvas";
+    canvas.hidden = true;
+    const fit = document.createElement("button");
+    fit.type = "button";
+    fit.className = "overview-fit";
+    fit.textContent = "适合视图";
+    const svg = document.createElementNS("http:" + "//www.w3.org/2000/svg", "svg");
+    svg.setAttribute("role", "tree");
+    svg.setAttribute("aria-label", "主题完整思考树");
+    canvas.append(fit, svg);
+    const folded = Object.prototype.hasOwnProperty.call(manualFold, row.dataset.nodeId)
+      ? Boolean(manualFold[row.dataset.nodeId])
+      : true;
+    row.setAttribute("aria-expanded", String(!folded));
+    canvas.hidden = folded;
+    block.append(row, canvas);
+    fit.addEventListener("click", async (event) => {
+      event.stopPropagation();
+      const map = await mountOverview(canvas, data, row.dataset.nodeId);
+      await map.fit(1.08);
+    });
+    if (!folded) void mountOverview(canvas, data, row.dataset.nodeId);
+    return block;
+  }
+
+  function buildTopic(data) {
+    const headerRow = contentElement(data);
+    if (!headerRow) return null;
+    const section = document.createElement("section");
+    section.className = "topic-section";
+    section.dataset.nodeId = headerRow.dataset.nodeId || "";
+    const header = document.createElement("header");
+    header.className = "topic-header";
+    header.append(headerRow);
+    const body = document.createElement("div");
+    body.className = "topic-body";
+    for (const child of data.children || []) {
+      const preview = contentElement(child);
+      const kind = preview?.dataset.kind;
+      const element = kind === "session" ? buildSession(child) : kind === "thoughts" ? buildOverview(child) : null;
+      if (element) body.append(element);
+    }
+    section.append(header, body);
+    return section;
+  }
+
+  async function renderMap(markdown) {
+    const anchor = directoryAnchor();
+    const transformed = transformer.transform(markdown);
+    applyManualFolds(transformed.root);
+    overviewMaps.clear();
+    directory.replaceChildren();
+    for (const topic of transformed.root.children || []) {
+      const element = buildTopic(topic);
+      if (element) directory.append(element);
+    }
+    if (!directory.childElementCount) {
+      const empty = document.createElement("div");
+      empty.className = "empty-map";
+      empty.textContent = "等待 Claude Code / Codex 产生第一条结构变化";
+      directory.append(empty);
+    }
+    decorateRows();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    pinDirectoryAnchor(anchor);
+    loading.hidden = true;
+  }
 
   function renderChrome(data) {
     statusLine.textContent = `${data.activeSessions} 个活跃 session · 更新于 ${relativeTime(data.updatedAt)}`;
@@ -471,7 +523,7 @@
   }
 
   function setJumpPending(sessionId, pending) {
-    const rows = [...svg.querySelectorAll(".fm-line[data-session-id]")]
+    const rows = [...directory.querySelectorAll(".fm-line[data-session-id]")]
       .filter((row) => row.dataset.sessionId === sessionId);
     for (const row of rows) {
       row.classList.toggle("is-jumping", pending);
@@ -529,18 +581,60 @@
     await poll(true);
   }
 
-  async function toggleNodeById(id) {
-    const node = id && dataById(id);
+  function overviewDataById(map, id) {
+    let found = null;
+    walk(map?.state?.data, (node) => {
+      if (!found && extractNodeId(node) === id) found = node;
+    });
+    return found;
+  }
+
+  async function toggleOverviewNode(map, id) {
+    const node = id && overviewDataById(map, id);
     if (!id || !node?.children?.length) return;
     const next = !Boolean(node.payload?.fold);
     manualFold[id] = next;
     saveManualFold();
-    await mm.toggleNode(node);
-    decorateInteractiveRows();
+    await map.toggleNode(node);
+    decorateRows(map.svg.node());
   }
 
-  async function toggleRow(row) {
-    await toggleNodeById(row.dataset.nodeId);
+  async function toggleDirectoryDisclosure(row) {
+    const id = row?.dataset.nodeId;
+    if (!id) return;
+    const anchor = { id, y: row.getBoundingClientRect().top };
+    const session = row.closest(".session-entry");
+    if (session) {
+      const trail = session.querySelector(":scope > .session-trail");
+      if (!trail) return;
+      const expanded = trail.hidden;
+      trail.hidden = !expanded;
+      manualFold[id] = !expanded;
+      syncDisclosureControl(row, expanded);
+      saveManualFold();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      pinDirectoryAnchor(anchor);
+      return;
+    }
+    const overview = row.closest(".topic-overview");
+    if (!overview) return;
+    const canvas = overview.querySelector(":scope > .overview-canvas");
+    const expanded = canvas.hidden;
+    canvas.hidden = !expanded;
+    manualFold[id] = !expanded;
+    row.setAttribute("aria-expanded", String(expanded));
+    saveManualFold();
+    if (expanded) {
+      const map = await mountOverview(canvas, overview._overviewData, id);
+      await map.fit(1.08);
+    }
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    pinDirectoryAnchor(anchor);
+  }
+
+  async function toggleNodeById(id) {
+    const row = id && directory.querySelector(`.fm-line[data-node-id="${CSS.escape(id)}"]`);
+    if (row) await toggleDirectoryDisclosure(row);
   }
 
   function inlineContextToggle(event) {
@@ -580,27 +674,7 @@
     return target instanceof Element ? target.closest(".fm-line") : null;
   }
 
-  svg.addEventListener("pointerdown", (event) => {
-    pointerStart = { x: event.clientX, y: event.clientY };
-    pointerDragged = false;
-  }, true);
-  svg.addEventListener("pointermove", (event) => {
-    if (!pointerStart) return;
-    if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > DRAG_THRESHOLD) {
-      pointerDragged = true;
-    }
-  }, true);
-  svg.addEventListener("pointerup", () => {
-    window.setTimeout(() => { pointerStart = null; }, 0);
-  }, true);
-
-  svg.addEventListener("click", async (event) => {
-    if (pointerDragged) {
-      event.preventDefault();
-      event.stopPropagation();
-      pointerDragged = false;
-      return;
-    }
+  directory.addEventListener("click", async (event) => {
     const jumpControl = inlineSessionJump(event);
     if (jumpControl) {
       event.preventDefault();
@@ -614,26 +688,11 @@
       event.preventDefault();
       event.stopPropagation();
       const sessionRow = contextToggle.closest(".fm-session");
-      if (sessionRow) await toggleNodeById(sessionRow.dataset.nodeId);
+      if (sessionRow) await toggleDirectoryDisclosure(sessionRow);
       return;
     }
     const row = rowFromEvent(event);
-    if (!row) {
-      const target = event.target;
-      const circle = target instanceof Element ? target.closest("g.markmap-node > circle") : null;
-      if (circle) {
-        // Markmap owns the native circle toggle. Record its resulting state after
-        // its target listener runs so manual intent survives data refresh.
-        window.setTimeout(() => {
-          const node = circle.parentElement?.__data__;
-          const id = extractNodeId(node);
-          if (!id || !node?.children?.length) return;
-          manualFold[id] = Boolean(node.payload?.fold);
-          saveManualFold();
-        }, 0);
-      }
-      return;
-    }
+    if (!row) return;
     const sessionId = row.dataset.sessionId;
     if (event.altKey && sessionId) {
       event.preventDefault();
@@ -652,11 +711,11 @@
     } else if (row.dataset.action === "toggle") {
       event.preventDefault();
       event.stopPropagation();
-      await toggleRow(row);
+      await toggleDirectoryDisclosure(row);
     }
   }, true);
 
-  svg.addEventListener("keydown", async (event) => {
+  directory.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     const jumpControl = inlineSessionJump(event);
     if (jumpControl) {
@@ -669,7 +728,7 @@
     if (contextToggle) {
       event.preventDefault();
       const sessionRow = contextToggle.closest(".fm-session");
-      if (sessionRow) await toggleNodeById(sessionRow.dataset.nodeId);
+      if (sessionRow) await toggleDirectoryDisclosure(sessionRow);
       return;
     }
     const row = rowFromEvent(event);
@@ -677,10 +736,10 @@
     event.preventDefault();
     if (event.altKey && row.dataset.sessionId) openSay(row.dataset.sessionId, row.textContent.trim());
     else if (row.dataset.action === "jump") await jump(row.dataset.sessionId);
-    else if (row.dataset.action === "toggle") await toggleRow(row);
+    else if (row.dataset.action === "session" || row.dataset.action === "toggle") await toggleDirectoryDisclosure(row);
   });
 
-  svg.addEventListener("contextmenu", async (event) => {
+  directory.addEventListener("contextmenu", async (event) => {
     const row = rowFromEvent(event);
     if (!row || row.dataset.kind !== "mainline") return;
     event.preventDefault();
@@ -692,7 +751,7 @@
     }
   }, true);
 
-  svg.addEventListener("dblclick", async (event) => {
+  directory.addEventListener("dblclick", async (event) => {
     if (inlineContextToggle(event) || inlineSessionJump(event)) return;
     const row = rowFromEvent(event);
     if (row?.dataset.action === "session") {
@@ -704,13 +763,58 @@
       return;
     }
     if (row) return;
-    event.preventDefault();
-    mm?.fit(1.12);
   }, true);
 
-  document.getElementById("fit-button").addEventListener("click", () => {
-    mm?.fit(1.12);
-  });
+  function bindOverviewEvents(svg, map) {
+    let pointerStart = null;
+    let pointerDragged = false;
+    svg.addEventListener("pointerdown", (event) => {
+      pointerStart = { x: event.clientX, y: event.clientY };
+      pointerDragged = false;
+    }, true);
+    svg.addEventListener("pointermove", (event) => {
+      if (!pointerStart) return;
+      if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > DRAG_THRESHOLD) pointerDragged = true;
+    }, true);
+    svg.addEventListener("pointerup", () => window.setTimeout(() => { pointerStart = null; }, 0), true);
+    svg.addEventListener("click", async (event) => {
+      if (pointerDragged) {
+        pointerDragged = false;
+        return;
+      }
+      const row = rowFromEvent(event);
+      if (!row) {
+        const target = event.target;
+        const circle = target instanceof Element ? target.closest("g.markmap-node > circle") : null;
+        if (circle) window.setTimeout(() => {
+          const node = circle.parentElement?.__data__;
+          const id = extractNodeId(node);
+          if (!id || !node?.children?.length) return;
+          manualFold[id] = Boolean(node.payload?.fold);
+          saveManualFold();
+        }, 0);
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (row.dataset.action === "jump" && row.dataset.sessionId) await jump(row.dataset.sessionId);
+      else if (row.dataset.action === "toggle") await toggleOverviewNode(map, row.dataset.nodeId);
+    }, true);
+    svg.addEventListener("keydown", async (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const row = rowFromEvent(event);
+      if (!row) return;
+      event.preventDefault();
+      if (row.dataset.action === "jump") await jump(row.dataset.sessionId);
+      else if (row.dataset.action === "toggle") await toggleOverviewNode(map, row.dataset.nodeId);
+    });
+    svg.addEventListener("dblclick", (event) => {
+      if (rowFromEvent(event)) return;
+      event.preventDefault();
+      void map.fit(1.08);
+    }, true);
+  }
+
   archivedButton.addEventListener("click", () => { archiveDrawer.hidden = false; });
   document.getElementById("archive-close").addEventListener("click", () => { archiveDrawer.hidden = true; });
 
@@ -769,14 +873,6 @@
     }
     const match = location.hash.match(/^#session=([^&]+)$/);
     if (match) jump(decodeURIComponent(match[1]), true);
-  });
-
-  window.addEventListener("resize", () => {
-    window.clearTimeout(resizeTimer);
-    resizeTimer = window.setTimeout(() => {
-      if (!mm) return;
-      void mm.fit(1.08);
-    }, 180);
   });
 
   async function poll(force = false) {

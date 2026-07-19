@@ -24,15 +24,18 @@ describe("offline browser bundle", () => {
     const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
     expect(app).toContain('color: () => "#aab2be"');
     expect(css).toContain("--branch: #aab2be");
-    expect(css).toContain(".markmap-link { stroke: var(--branch) !important;");
+    expect(css).toContain(".overview-canvas .markmap-link { stroke: var(--branch) !important;");
     // Regression: invisible markmap measurement boxes must not cover child rows.
-    expect(css).toContain("#mindmap foreignObject { overflow: hidden; }");
-    expect(css).not.toContain("#mindmap foreignObject { overflow: visible; }");
+    expect(css).toContain(".overview-canvas foreignObject { overflow: hidden; }");
+    expect(css).not.toContain(".overview-canvas foreignObject { overflow: visible; }");
   });
 
-  test("keeps viewport navigation separate from user-controlled disclosure", () => {
+  test("keeps directory scrolling and local viewport navigation separate from disclosure", () => {
     const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
     expect(app).toContain("async function toggleNodeById(id)");
+    expect(app).toContain("async function toggleDirectoryDisclosure(row)");
+    expect(app).toContain("function pinDirectoryAnchor(anchor)");
+    expect(app).toContain('control.textContent = expanded ? "收起" : "脉络"');
     expect(app).toContain("manualFold[id] = next");
     expect(app).toContain("saveManualFold()");
     expect(app).not.toContain("applySemanticZoom");
@@ -40,11 +43,14 @@ describe("offline browser bundle", () => {
     expect(app).not.toMatch(/transform\.k\s*[<>]/);
 
     const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
-    expect(html).toContain("拖动画布");
-    expect(html).toContain("滚轮缩放");
-    expect(html).toContain("单击展开");
-    expect(html).toContain("双击回到终端");
-    expect(html).not.toContain("<span>全景</span><i></i><span>转折</span>");
+    expect(html).toContain('id="directory"');
+    expect(html).toContain("主题与 Session 目录");
+    expect(html).not.toContain('id="mindmap"');
+    expect(html).not.toContain("拖动画布");
+    expect(html).not.toContain('id="fit-button"');
+
+    const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    expect(css).toContain('.thought-summary[aria-expanded="true"]::after { content: "收起"; }');
   });
 
   test("separates session disclosure from terminal navigation", () => {

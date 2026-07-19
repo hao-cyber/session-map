@@ -581,6 +581,187 @@ textarea:focus-visible {
 
 .lod-legend i { width: 16px; height: 1px; background: #c8cbd1; }
 
+.directory {
+  width: min(1080px, 100%);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 20px 28px 80px;
+}
+
+#map-shell {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-padding-top: 64px;
+}
+
+.topic-section {
+  position: relative;
+  margin: 0 0 28px;
+}
+
+.topic-header {
+  position: sticky;
+  z-index: 6;
+  top: 0;
+  padding: 8px 0 7px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(247, 247, 248, 0.96);
+  backdrop-filter: blur(12px);
+}
+
+.topic-header .fm-mainline {
+  width: 100%;
+  min-width: 0;
+  padding-inline: 4px 8px;
+}
+
+.topic-body {
+  position: relative;
+  margin-left: 13px;
+  padding: 5px 0 0 22px;
+}
+
+.topic-body::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 18px;
+  left: 0;
+  width: 1px;
+  background: var(--branch);
+  opacity: 0.72;
+}
+
+.session-entry,
+.topic-overview {
+  position: relative;
+}
+
+.session-entry::before,
+.topic-overview::before {
+  content: "";
+  position: absolute;
+  top: 25px;
+  left: -22px;
+  width: 18px;
+  height: 1px;
+  background: var(--branch);
+  opacity: 0.72;
+}
+
+.directory .fm-session {
+  width: 100%;
+  min-width: 0;
+  min-height: 54px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(228, 228, 232, 0.72);
+  border-radius: 0;
+}
+
+.directory .fm-session:hover {
+  border-color: rgba(228, 228, 232, 0.72);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.directory .session-copy { flex: 1 1 300px; }
+.directory .session-title,
+.directory .session-progress { max-width: min(560px, 56vw); }
+.directory .session-meta { min-width: 94px; }
+
+.session-trail {
+  position: relative;
+  display: grid;
+  gap: 0;
+  margin: 0 0 5px 18px;
+  padding: 5px 0 8px 24px;
+  border-left: 1px solid var(--branch);
+}
+
+.session-trail[hidden] { display: none; }
+
+.session-trail .snapshot-trail {
+  position: relative;
+  width: min(720px, 100%);
+  max-width: none;
+  min-height: 30px;
+  white-space: normal;
+  line-height: 1.55;
+}
+
+.session-trail .snapshot-trail::before {
+  content: "";
+  position: absolute;
+  top: 15px;
+  left: -25px;
+  width: 18px;
+  height: 1px;
+  background: var(--branch);
+}
+
+.directory .thought-summary {
+  width: 100%;
+  min-height: 42px;
+  margin-top: 3px;
+  padding: 7px 8px;
+  border-radius: 6px;
+}
+
+.directory .thought-summary::after {
+  content: "展开";
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.directory .thought-summary[aria-expanded="true"]::after { content: "收起"; }
+
+.overview-canvas {
+  position: relative;
+  height: min(520px, 58vh);
+  min-height: 360px;
+  margin: 2px 0 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.overview-canvas[hidden] { display: none; }
+
+.overview-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  --markmap-font: 450 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  --markmap-text-color: var(--ink-soft);
+  --markmap-circle-open-bg: var(--surface);
+}
+
+.overview-canvas .markmap-link { stroke: var(--branch) !important; stroke-opacity: 0.82; }
+.overview-canvas .markmap-node > line { stroke: var(--branch) !important; }
+.overview-canvas .markmap-node > circle { stroke: #9099a6 !important; fill: var(--surface); }
+.overview-canvas foreignObject { overflow: hidden; }
+
+.overview-fit {
+  position: absolute;
+  z-index: 4;
+  right: 10px;
+  bottom: 10px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink-soft);
+  background: rgba(255, 255, 255, 0.92);
+  cursor: pointer;
+}
+
+.overview-fit:hover { color: var(--ink); background: var(--surface-hover); }
+
 .archive-drawer {
   position: fixed;
   z-index: 40;
@@ -718,6 +899,9 @@ textarea:focus-visible {
   .session-title,
   .session-progress { max-width: 230px; }
   .node-note { max-width: 180px; }
+  .directory { padding-inline: 18px; }
+  .directory .session-title,
+  .directory .session-progress { max-width: 42vw; }
 }
 
 @media (max-width: 560px) {
@@ -734,6 +918,17 @@ textarea:focus-visible {
   .archive-drawer { width: 100vw; padding: 20px; }
   .say-actions { align-items: flex-end; }
   .say-actions > span { max-width: 220px; }
+  .directory { padding: 12px 10px 64px; }
+  .topic-body { margin-left: 8px; padding-left: 14px; }
+  .session-entry::before,
+  .topic-overview::before { left: -14px; width: 11px; }
+  .directory .fm-session { align-items: flex-start; flex-wrap: wrap; }
+  .directory .session-copy { flex-basis: calc(100% - 24px); }
+  .directory .session-title,
+  .directory .session-progress { max-width: calc(100vw - 76px); }
+  .directory .session-meta { margin-left: 23px; align-items: flex-start; }
+  .session-context-toggle { margin-left: auto; }
+  .overview-canvas { min-height: 320px; height: 52vh; }
 }
 
 @media (hover: none), (pointer: coarse) {

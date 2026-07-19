@@ -140,8 +140,10 @@ Session 动作使用确定的降级阶梯。持久 handle 和 PID 只作为候�
 ## 本地网页与服务
 
 系统浏览器是唯一产品界面。Bun 服务同时负责 transcript watcher、状态写入、vendored
-Web 资产和受 capability 保护的 API；浏览器只持有读取与动作所需的当前 tab 凭据，
-不保存第二份业务状态。
+Web 资产和受 capability 保护的 API；服务端读取投影提供主题、稳定 session 目录、
+有界 session 脉络与主题全貌结构，浏览器只持有当前 tab 凭据以及滚动、披露和局部相机
+等读取状态，不保存第二份业务状态。默认目录使用页面纵向滚动；二维平移缩放只属于
+按需展开的主题全貌，不能成为寻找 session 的旁路导航机制。
 
 服务可由 `sessionmap serve` 前台运行，也可用 standalone CLI 的 `sessionmap install`
 安装为当前用户的 launchd 服务。`sessionmap open` 负责打开授权页面。Terminal、iTerm
