@@ -433,13 +433,16 @@
       const label = document.createElement("span");
       label.className = "now-label";
       label.textContent = item.label;
+      const mainline = document.createElement("span");
+      mainline.className = "now-mainline";
+      mainline.textContent = item.mainline;
       const detail = document.createElement("span");
       detail.className = "now-detail";
-      detail.textContent = item.detail || item.mainline;
+      detail.textContent = item.detail && item.detail !== item.mainline ? item.detail : "";
       const time = document.createElement("time");
       time.className = "now-time";
       time.textContent = relativeTime(item.at);
-      button.append(label, detail, time);
+      button.append(label, mainline, detail, time);
       button.addEventListener("click", () => item.sessionId && jump(item.sessionId));
       nowBar.append(button);
     }
@@ -652,14 +655,26 @@
     if (!timer) return;
     window.clearTimeout(timer);
     pendingSessionClicks.delete(nodeId);
+    setDisclosurePending(nodeId, false);
+  }
+
+  function setDisclosurePending(nodeId, pending) {
+    if (!nodeId) return;
+    const row = directory.querySelector(`.fm-session[data-node-id="${CSS.escape(nodeId)}"]`);
+    if (!row) return;
+    row.classList.toggle("is-disclosure-pending", pending);
+    if (pending) row.setAttribute("aria-busy", "true");
+    else if (!row.classList.contains("is-jumping")) row.removeAttribute("aria-busy");
   }
 
   function scheduleSessionToggle(row) {
     const nodeId = row.dataset.nodeId;
     if (!nodeId) return;
     cancelSessionToggle(nodeId);
+    setDisclosurePending(nodeId, true);
     const timer = window.setTimeout(async () => {
       pendingSessionClicks.delete(nodeId);
+      setDisclosurePending(nodeId, false);
       try {
         await toggleNodeById(nodeId);
       } catch (error) {

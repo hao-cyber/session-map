@@ -51,12 +51,16 @@ describe("offline browser bundle", () => {
 
     const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
     expect(css).toContain('.thought-summary[aria-expanded="true"]::after { content: "收起"; }');
+    expect(css).not.toContain("#mindmap");
+    expect(css).not.toContain(".lod-legend");
   });
 
   test("separates session disclosure from terminal navigation", () => {
     const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
     expect(app).toContain("const SESSION_CLICK_DELAY_MS = 350");
     expect(app).toContain("function scheduleSessionToggle(row)");
+    expect(app).toContain("function setDisclosurePending(nodeId, pending)");
+    expect(app).toContain('row.classList.toggle("is-disclosure-pending", pending)');
     expect(app).toContain('row.dataset.action === "session"');
     expect(app).toContain("cancelSessionToggle(row.dataset.nodeId)");
     expect(app).toContain("await jump(row.dataset.sessionId)");
@@ -70,6 +74,15 @@ describe("offline browser bundle", () => {
     const render = readFileSync(resolve(root, "src", "render.ts"), "utf8");
     expect(render).toContain('data-action="session"');
     expect(render).toContain('data-inline-action="jump-session"');
+  });
+
+  test("keeps the work mainline visible in every Now item", () => {
+    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    expect(app).toContain('mainline.className = "now-mainline"');
+    expect(app).toContain("mainline.textContent = item.mainline");
+    expect(app).toContain("item.detail && item.detail !== item.mainline");
+    expect(css).toContain(".now-mainline");
   });
 
   test("bootstraps a one-time open ticket and gives expired credentials a recovery action", () => {

@@ -7,7 +7,7 @@
   --branch: #aab2be;
   --ink: #202124;
   --ink-soft: #50525a;
-  --muted: #7d808a;
+  --muted: #6b6e78;
   --faint: #a4a7af;
   --decision: #b4233a;
   --waiting: #9a5b00;
@@ -170,7 +170,7 @@ textarea:focus-visible {
 .now-bar {
   position: relative;
   z-index: 15;
-  min-height: 56px;
+  min-height: 68px;
   display: flex;
   align-items: stretch;
   overflow-x: auto;
@@ -178,7 +178,7 @@ textarea:focus-visible {
   border-bottom: 1px solid var(--line);
   background: rgba(250, 250, 251, 0.94);
   scrollbar-width: none;
-  flex: 0 0 56px;
+  flex: 0 0 68px;
 }
 
 .now-bar::-webkit-scrollbar { display: none; }
@@ -194,14 +194,14 @@ textarea:focus-visible {
 
 .now-item {
   position: relative;
-  min-width: 176px;
-  max-width: 280px;
+  min-width: 220px;
+  max-width: 320px;
   display: grid;
   grid-template-columns: 7px minmax(0, 1fr);
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   column-gap: 9px;
   align-content: center;
-  padding: 8px 24px 8px 12px;
+  padding: 7px 28px 7px 12px;
   border: 0;
   border-right: 1px solid var(--line);
   text-align: left;
@@ -217,7 +217,7 @@ textarea:focus-visible {
   box-shadow: inset 0 0 0 2px var(--focus);
 }
 .now-item::before {
-  grid-row: 1 / 3;
+  grid-row: 1 / 4;
   align-self: center;
   width: 7px;
   height: 7px;
@@ -243,8 +243,12 @@ textarea:focus-visible {
 .now-item[data-kind="busy"] .now-label { color: var(--busy); }
 .now-item[data-kind="recent"] .now-label { color: var(--fresh-5); }
 .now-label { font-size: 11px; font-weight: 700; letter-spacing: 0.012em; }
-.now-detail { margin-top: 2px; color: var(--ink-soft); font-size: 11px; font-weight: 450; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.now-time { position: absolute; right: 9px; top: 8px; color: var(--ink-soft); font-size: 10px; }
+.now-mainline,
+.now-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.now-mainline { margin-top: 1px; color: var(--ink); font-size: 11px; font-weight: 620; }
+.now-detail { margin-top: 1px; color: var(--ink-soft); font-size: 10px; font-weight: 450; }
+.now-detail:empty { display: none; }
+.now-time { position: absolute; right: 9px; top: 7px; color: var(--ink-soft); font-size: 10px; }
 
 #map-shell {
   position: relative;
@@ -252,23 +256,6 @@ textarea:focus-visible {
   background: var(--bg);
   flex: 1 1 auto;
 }
-
-#mindmap {
-  display: block;
-  width: 100%;
-  height: 100%;
-  touch-action: none;
-  user-select: none;
-  --markmap-font: 450 13px/1.35 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
-  --markmap-text-color: var(--ink-soft);
-  --markmap-circle-open-bg: var(--bg);
-}
-
-#mindmap .markmap-link { stroke: var(--branch) !important; stroke-opacity: 0.82; }
-#mindmap .markmap-node > line { stroke: var(--branch) !important; }
-#mindmap .markmap-node > circle { stroke: #9099a6 !important; fill: var(--bg); }
-#mindmap .markmap-node > circle:hover { fill: var(--surface-hover); stroke: var(--focus) !important; }
-#mindmap foreignObject { overflow: hidden; }
 
 .map-root {
   color: var(--ink-soft);
@@ -545,42 +532,6 @@ textarea:focus-visible {
 
 .loading-state[hidden] { display: none; }
 
-.fit-button {
-  position: absolute;
-  z-index: 12;
-  right: 18px;
-  bottom: 18px;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 0 11px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  color: var(--ink-soft);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: 0 6px 22px rgba(32, 33, 36, 0.08);
-  cursor: pointer;
-}
-
-.fit-button:hover { color: var(--ink); background: var(--surface-hover); }
-.fit-button:active { background: #e9e9ec; }
-
-.lod-legend {
-  position: absolute;
-  z-index: 10;
-  left: 18px;
-  bottom: 21px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-soft);
-  font-size: 10px;
-  letter-spacing: 0.04em;
-}
-
-.lod-legend i { width: 16px; height: 1px; background: #c8cbd1; }
-
 .directory {
   width: min(1080px, 100%);
   min-height: 100%;
@@ -662,6 +613,11 @@ textarea:focus-visible {
 .directory .fm-session:hover {
   border-color: rgba(228, 228, 232, 0.72);
   background: rgba(255, 255, 255, 0.72);
+}
+
+.directory .fm-session.is-disclosure-pending {
+  background: rgba(88, 98, 115, 0.065);
+  box-shadow: inset 2px 0 0 rgba(88, 98, 115, 0.34);
 }
 
 .directory .session-copy { flex: 1 1 300px; }
@@ -912,9 +868,7 @@ textarea:focus-visible {
   .engine-control > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .engine-control select { max-width: 82px; }
   .now-bar { padding-inline: 4px; }
-  .now-item { min-width: 168px; padding-left: 10px; }
-  .lod-legend { display: none; }
-  .fit-button { right: 12px; bottom: 12px; }
+  .now-item { min-width: 204px; padding-left: 10px; }
   .archive-drawer { width: 100vw; padding: 20px; }
   .say-actions { align-items: flex-end; }
   .say-actions > span { max-width: 220px; }
