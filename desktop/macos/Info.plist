@@ -19,22 +19,5 @@
   <dict><key>NSAllowsLocalNetworking</key><true/></dict>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSSupportsAutomaticGraphicsSwitching</key><true/>
-  <key>CFBundleDocumentTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleTypeName</key><string>Web URL</string>
-      <key>CFBundleTypeRole</key><string>Viewer</string>
-      <key>LSHandlerRank</key><string>Alternate</string>
-      <key>LSItemContentTypes</key><array><string>public.url</string></array>
-    </dict>
-  </array>
-  <key>CFBundleURLTypes</key>
-  <array>
-    <dict>
-      <key>CFBundleURLName</key><string>com.haocyber.sessionmap.open</string>
-      <key>CFBundleURLSchemes</key>
-      <array><string>sessionmap</string></array>
-    </dict>
-  </array>
 </dict>
 </plist>

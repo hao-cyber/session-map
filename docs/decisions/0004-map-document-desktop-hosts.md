@@ -48,10 +48,9 @@ macOS 极薄壳中的 WKWebView ───┘              │
 ```
 
 用户从 Dock 打开壳时，壳先检查 `/health`：健康则直接加载固定根地址；不健康则只调用
-已安装 CLI 的统一 `install` 事务，成功后再加载根地址。若用户显式执行
-`sessionmap open --browser <App bundle path>`，CLI 仍先用状态目录中的 0600 secret 签发
-短期 ticket 并登记 open request；LaunchServices 把 URL 交给已经运行的单实例 App，
-WKWebView 完成 snapshot 和地图渲染后沿原协议回执。
+已安装 CLI 的统一 `install` 事务，成功后再加载根地址。App 仅通过 Dock、Spotlight 或
+安装后的自动打开召回；`sessionmap open --browser` 仍只服务真实浏览器的 ticket/ready
+协议。壳不注册 URL scheme、不伪装浏览器，也不接触长期 capability。
 
 ## 失败、重启与安全
 

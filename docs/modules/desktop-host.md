@@ -36,8 +36,8 @@
 - 关闭、崩溃或卸载展示容器不影响 watcher、tree、offset 或 session 入口。
 - 冷启动时服务健康则直接加载固定地址；服务不健康则由 CLI install 完成原子替换、健康
   检查和回滚。失败留在壳原位显示可执行错误，不展示演示数据。
-- `sessionmap open --browser <App bundle>` 仍可把 ticket URL 交给已经运行的 App；页面按
-  原协议在首帧完成后回执。直接点击 Dock 不需要伪造 CLI 回执。
+- App 只通过 Dock、Spotlight 或安装后的自动打开召回；`sessionmap open --browser` 继续
+  专注真实浏览器的 ticket/ready 协议。壳不注册 URL scheme，也不进入浏览器握手职责。
 - 降级到没有 App 的旧发布不迁移用户状态；浏览器入口仍可使用。
 
 ## 验证
@@ -46,6 +46,6 @@
 - 发布构建同时生成 arm64/x86_64 standalone CLI 和 universal App 壳，分别检查 Mach-O
   架构、签名，并随同一个 `.pkg` 公证。
 - 真实验收覆盖：Dock 冷启动、单实例 reopen、窗口位置恢复、默认不置顶、显式置顶、服务
-  未运行时统一 install、服务重启后恢复、CLI 指定 App 的 ready 回执、外部导航不进入壳。
+  未运行时统一 install、服务重启后恢复、Dock reopen、外部导航不进入壳。
 - 用代表性桌面尺寸分别截取普通浏览器与 App，检查三层层级、纵向滚动、溢出、命中区、
   披露反馈和窗口最小尺寸。截图与 QA 报告不得进入发布产物。

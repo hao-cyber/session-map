@@ -17,15 +17,6 @@ final class SessionMapApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
     private var opening = false
     private var keepAboveItem: NSMenuItem!
 
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        NSAppleEventManager.shared().setEventHandler(
-            self,
-            andSelector: #selector(handleGetURL(_:withReplyEvent:)),
-            forEventClass: AEEventClass(kInternetEventClass),
-            andEventID: AEEventID(kAEGetURL)
-        )
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
         buildWindow()
@@ -39,19 +30,6 @@ final class SessionMapApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         showMap(nil)
         return true
-    }
-
-    func application(_ application: NSApplication, open urls: [URL]) {
-        guard let url = urls.compactMap(requestedMapURL).first else { return }
-        showWindow()
-        load(url)
-    }
-
-    @objc private func handleGetURL(_ event: NSAppleEventDescriptor, withReplyEvent reply: NSAppleEventDescriptor) {
-        guard let value = event.paramDescriptor(forKeyword: AEKeyword(keyDirectObject))?.stringValue,
-              let incoming = URL(string: value), let target = requestedMapURL(incoming) else { return }
-        showWindow()
-        load(target)
     }
 
     @objc private func showMap(_ sender: Any?) {
@@ -137,15 +115,6 @@ final class SessionMapApp: NSObject, NSApplicationDelegate, NSWindowDelegate, WK
 
     private func isAllowedURL(_ url: URL) -> Bool {
         url.scheme == "http" && url.host == "127.0.0.1" && (url.port ?? 80) == 4317
-    }
-
-    private func requestedMapURL(_ url: URL) -> URL? {
-        if isAllowedURL(url) { return url }
-        guard url.scheme == "sessionmap", url.host == "open",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let value = components.queryItems?.first(where: { $0.name == "url" })?.value,
-              let target = URL(string: value), isAllowedURL(target) else { return nil }
-        return target
     }
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
