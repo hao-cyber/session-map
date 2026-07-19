@@ -102,7 +102,7 @@ function mainlineState(state: TrailState, rootId: string, sessions: SessionRecor
 
 function cursorMarkup(session: SessionRecord, multiple: boolean): string {
   const statusClass = `session-${session.status}`;
-  const title = escapeHtml(`${session.provider} · ${session.title}`);
+  const title = escapeMarkdown(`${session.provider} · ${session.title}`);
   if (!multiple) {
     return `<span class="cursor cursor-single ${statusClass}" data-action="jump" data-session-id="${escapeHtml(session.id)}" title="${title}">${icon(session.status === "closed" ? "moon" : "crosshair", session.status === "closed" ? "终端已关，点击复活" : "当前 session")}</span>`;
   }
@@ -142,8 +142,10 @@ function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
   const cursorLabel = session.cursor ? state.nodes[session.cursor]?.label : undefined;
   const progress = snapshot.progress || cursorLabel || "等待结构性进展";
   const trailCount = snapshot.trail.length;
+  const jumpLabel = session.status === "closed" ? "恢复" : "切回";
+  const actionHint = trailCount ? `单击展开脉络 · 双击${jumpLabel}` : `双击${jumpLabel}`;
   return [
-    `<span class="fm-line fm-session ${status.className}" data-kind="session" data-node-id="${escapeHtml(sessionPresentationId(session))}"${trailCount ? ' data-default-fold="true"' : ""} data-action="jump" data-session-id="${escapeHtml(session.id)}" title="${escapeHtml(`${session.provider} · ${session.title}`)}">`,
+    `<span class="fm-line fm-session ${status.className}" data-kind="session" data-node-id="${escapeHtml(sessionPresentationId(session))}"${trailCount ? ' data-default-fold="true"' : ""} data-action="session" data-session-id="${escapeHtml(session.id)}" title="${escapeMarkdown(`${session.provider} · ${session.title} · ${actionHint}`)}">`,
     statusIcon,
     '<span class="session-copy">',
     `<span class="session-title">${escapeMarkdown(snapshot.summary || session.title)}</span>`,
@@ -154,8 +156,9 @@ function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
     `<span class="session-state-word">${escapeMarkdown(status.label)}</span>`,
     "</span>",
     trailCount
-      ? `<span class="session-context-toggle" data-inline-action="toggle-context" role="button" tabindex="0" aria-label="展开 ${trailCount} 条 session 脉络">脉络 ${trailCount}</span>`
+      ? `<button type="button" class="session-context-toggle" data-inline-action="toggle-context" aria-label="展开 ${trailCount} 条 session 脉络">脉络 ${trailCount}</button>`
       : "",
+    `<button type="button" class="session-jump-action" data-inline-action="jump-session" aria-label="${jumpLabel} ${escapeMarkdown(snapshot.summary || session.title)}">${jumpLabel}</button>`,
     "</span>",
   ].join("");
 }

@@ -3,6 +3,7 @@
 
   const POLL_MS = 4_000;
   const DRAG_THRESHOLD = 5;
+  const SESSION_CLICK_DELAY_MS = 260;
   const API_HEADERS = {
     "X-SessionMap-Token": window.SESSIONMAP_TOKEN,
   };
@@ -38,6 +39,7 @@
   let suppressHash = false;
   let resizeTimer = 0;
   let manualFold = loadManualFold();
+  const pendingSessionClicks = new Map();
 
   function loadManualFold() {
     try {
@@ -271,7 +273,9 @@
       const contextToggle = row.querySelector('[data-inline-action="toggle-context"]');
       if (contextToggle) {
         const data = dataById(row.dataset.nodeId);
-        contextToggle.setAttribute("aria-expanded", String(!Boolean(data?.payload?.fold)));
+        const expanded = !Boolean(data?.payload?.fold);
+        contextToggle.setAttribute("aria-expanded", String(expanded));
+        contextToggle.setAttribute("aria-label", `${expanded ? "折叠" : "展开"} session 脉络`);
       }
     }
   }
@@ -468,6 +472,33 @@
     return target instanceof Element ? target.closest('[data-inline-action="toggle-context"]') : null;
   }
 
+  function inlineSessionJump(event) {
+    const target = event.target;
+    return target instanceof Element ? target.closest('[data-inline-action="jump-session"]') : null;
+  }
+
+  function cancelSessionToggle(nodeId) {
+    const timer = nodeId && pendingSessionClicks.get(nodeId);
+    if (!timer) return;
+    window.clearTimeout(timer);
+    pendingSessionClicks.delete(nodeId);
+  }
+
+  function scheduleSessionToggle(row) {
+    const nodeId = row.dataset.nodeId;
+    if (!nodeId) return;
+    cancelSessionToggle(nodeId);
+    const timer = window.setTimeout(async () => {
+      pendingSessionClicks.delete(nodeId);
+      try {
+        await toggleNodeById(nodeId);
+      } catch (error) {
+        toast(error.message || String(error));
+      }
+    }, SESSION_CLICK_DELAY_MS);
+    pendingSessionClicks.set(nodeId, timer);
+  }
+
   function rowFromEvent(event) {
     const target = event.target;
     return target instanceof Element ? target.closest(".fm-line") : null;
@@ -492,6 +523,14 @@
       event.preventDefault();
       event.stopPropagation();
       pointerDragged = false;
+      return;
+    }
+    const jumpControl = inlineSessionJump(event);
+    if (jumpControl) {
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionRow = jumpControl.closest(".fm-session");
+      if (sessionRow?.dataset.sessionId) await jump(sessionRow.dataset.sessionId);
       return;
     }
     const contextToggle = inlineContextToggle(event);
@@ -526,7 +565,11 @@
       openSay(sessionId, row.textContent.trim());
       return;
     }
-    if (row.dataset.action === "jump" && sessionId) {
+    if (row.dataset.action === "session") {
+      event.preventDefault();
+      event.stopPropagation();
+      scheduleSessionToggle(row);
+    } else if (row.dataset.action === "jump" && sessionId) {
       event.preventDefault();
       event.stopPropagation();
       await jump(sessionId);
@@ -539,6 +582,13 @@
 
   svg.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    const jumpControl = inlineSessionJump(event);
+    if (jumpControl) {
+      event.preventDefault();
+      const sessionRow = jumpControl.closest(".fm-session");
+      if (sessionRow?.dataset.sessionId) await jump(sessionRow.dataset.sessionId);
+      return;
+    }
     const contextToggle = inlineContextToggle(event);
     if (contextToggle) {
       event.preventDefault();
@@ -566,11 +616,21 @@
     }
   }, true);
 
-  svg.addEventListener("dblclick", (event) => {
-    if (rowFromEvent(event)) return;
+  svg.addEventListener("dblclick", async (event) => {
+    if (inlineContextToggle(event) || inlineSessionJump(event)) return;
+    const row = rowFromEvent(event);
+    if (row?.dataset.action === "session") {
+      if (event.altKey) return;
+      event.preventDefault();
+      event.stopPropagation();
+      cancelSessionToggle(row.dataset.nodeId);
+      await jump(row.dataset.sessionId);
+      return;
+    }
+    if (row) return;
     event.preventDefault();
     mm?.fit(1.12);
-  });
+  }, true);
 
   document.getElementById("fit-button").addEventListener("click", () => {
     mm?.fit(1.12);

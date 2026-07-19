@@ -1,7 +1,43 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { LAUNCHD_LABEL, LEGACY_LAUNCHD_LABEL, SERVICE_START_TIMEOUT_MS, installedExecutablePath, launchArguments, launchdPlist } from "../src/launchd.ts";
+import {
+  installLaunchAgent,
+  LAUNCHD_LABEL,
+  LEGACY_LAUNCHD_LABEL,
+  SERVICE_START_TIMEOUT_MS,
+  installedExecutablePath,
+  launchAgentPath,
+  launchArguments,
+  launchdPlist,
+} from "../src/launchd.ts";
+import { createEmptyState } from "../src/state.ts";
+import { defaultStateDirectory, legacyStateDirectory } from "../src/utils.ts";
+import { cleanup, temporaryDirectory } from "./helpers.ts";
+
+const roots: string[] = [];
+
+afterEach(() => {
+  for (const root of roots.splice(0)) cleanup(root);
+});
+
+function legacyFixture(): { root: string; home: string; current: string; legacy: string; executable: string } {
+  const root = temporaryDirectory("sessionmap-launchd-");
+  roots.push(root);
+  const home = join(root, "home");
+  const current = defaultStateDirectory(home);
+  const legacy = legacyStateDirectory(home);
+  const executable = join(root, "sessionmap-next");
+  mkdirSync(legacy, { recursive: true });
+  mkdirSync(join(home, "Library", "LaunchAgents"), { recursive: true });
+  mkdirSync(join(home, ".local", "bin"), { recursive: true });
+  writeFileSync(join(legacy, "state.json"), JSON.stringify(createEmptyState("codex")), { mode: 0o600 });
+  writeFileSync(launchAgentPath(LEGACY_LAUNCHD_LABEL, home), "legacy plist");
+  writeFileSync(join(home, ".local", "bin", "maintrail"), "legacy binary");
+  writeFileSync(executable, "new binary", { mode: 0o755 });
+  return { root, home, current, legacy, executable };
+}
 
 describe("launchd distribution", () => {
   test("uses source files under Bun but a stable user bin for compiled releases", () => {
@@ -25,6 +61,59 @@ describe("launchd distribution", () => {
     expect(LAUNCHD_LABEL).toBe("com.haocyber.sessionmap.service");
     expect(LEGACY_LAUNCHD_LABEL).toBe("io.maintrail.service");
     expect(SERVICE_START_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
+  });
+
+  test("publishes a healthy migrated service before cleaning legacy entry points", async () => {
+    const fixture = legacyFixture();
+    const commands: string[][] = [];
+    const path = await installLaunchAgent(fixture.current, {
+      homeDirectory: fixture.home,
+      executable: fixture.executable,
+      userId: 123,
+      runCommand: async (command) => {
+        commands.push(command);
+        return { ok: true, text: "" };
+      },
+      waitForHealthy: async () => true,
+    });
+
+    expect(path).toBe(launchAgentPath(LAUNCHD_LABEL, fixture.home));
+    expect(existsSync(join(fixture.current, "state.json"))).toBeTrue();
+    expect(existsSync(join(fixture.legacy, "state.json"))).toBeTrue();
+    expect(existsSync(launchAgentPath(LEGACY_LAUNCHD_LABEL, fixture.home))).toBeFalse();
+    expect(existsSync(join(fixture.home, ".local", "bin", "maintrail"))).toBeFalse();
+    expect(readFileSync(installedExecutablePath(fixture.home), "utf8")).toBe("new binary");
+    expect(commands.some((command) => command[1] === "bootout" && command.at(-1)?.includes(LEGACY_LAUNCHD_LABEL))).toBeTrue();
+    expect(commands.some((command) => command[1] === "bootstrap" && command.at(-1) === path)).toBeTrue();
+  });
+
+  test("restores state, plist, binary, and previous service when health fails", async () => {
+    const fixture = legacyFixture();
+    const path = launchAgentPath(LAUNCHD_LABEL, fixture.home);
+    const previousPlist = "previous SessionMap plist";
+    writeFileSync(path, previousPlist);
+    writeFileSync(installedExecutablePath(fixture.home), "old binary", { mode: 0o755 });
+    const commands: string[][] = [];
+
+    await expect(installLaunchAgent(fixture.current, {
+      homeDirectory: fixture.home,
+      executable: fixture.executable,
+      userId: 123,
+      runCommand: async (command) => {
+        commands.push(command);
+        return { ok: true, text: "" };
+      },
+      waitForHealthy: async () => false,
+    })).rejects.toThrow("did not become healthy");
+
+    expect(existsSync(fixture.current)).toBeFalse();
+    expect(existsSync(join(fixture.legacy, "state.json"))).toBeTrue();
+    expect(readFileSync(path, "utf8")).toBe(previousPlist);
+    expect(readFileSync(installedExecutablePath(fixture.home), "utf8")).toBe("old binary");
+    expect(existsSync(launchAgentPath(LEGACY_LAUNCHD_LABEL, fixture.home))).toBeTrue();
+    expect(existsSync(join(fixture.home, ".local", "bin", "maintrail"))).toBeTrue();
+    const bootstraps = commands.filter((command) => command[1] === "bootstrap");
+    expect(bootstraps.at(-1)?.at(-1)).toBe(path);
   });
 
 });

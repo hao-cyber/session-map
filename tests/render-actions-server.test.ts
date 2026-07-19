@@ -111,6 +111,10 @@ describe("safe rendering and attention ordering", () => {
       ask: { kind: "none", hint: "" },
       ops: [],
     });
+    await store.update((state) => {
+      state.sessions[second.sessionId]!.status = "closed";
+      state.sessions[second.sessionId]!.terminalOpen = false;
+    });
 
     const markdown = renderMarkdown(store.snapshot());
     const lines = markdown.split("\n");
@@ -123,7 +127,12 @@ describe("safe rendering and attention ordering", () => {
     expect(sessions[0]).toContain("构建本地网页发布流程");
     expect(sessions[0]).toContain("等待选择安装引导");
     expect(sessions[0]).toContain("脉络 2");
+    expect(sessions[0]).toContain('data-action="session"');
+    expect(sessions[0]).toContain('data-inline-action="toggle-context"');
+    expect(sessions[0]).toContain('data-inline-action="jump-session"');
+    expect(sessions[0]).toContain(">切回</button>");
     expect(sessions[1]).toContain("复核发布流程");
+    expect(sessions[1]).toContain(">恢复</button>");
     expect(lines.indexOf(sessions[0]!)).toBeGreaterThan(topic);
     expect(lines.indexOf(sessions[1]!)).toBeLessThan(summary);
     expect(lines[summary]).toContain('data-default-fold="true"');

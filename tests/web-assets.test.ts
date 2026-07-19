@@ -42,7 +42,22 @@ describe("offline browser bundle", () => {
     const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
     expect(html).toContain("拖动画布");
     expect(html).toContain("滚轮缩放");
-    expect(html).toContain("点击展开");
+    expect(html).toContain("单击展开");
+    expect(html).toContain("双击切回");
     expect(html).not.toContain("<span>全景</span><i></i><span>转折</span>");
+  });
+
+  test("separates session disclosure from terminal navigation", () => {
+    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    expect(app).toContain("const SESSION_CLICK_DELAY_MS = 260");
+    expect(app).toContain("function scheduleSessionToggle(row)");
+    expect(app).toContain('row.dataset.action === "session"');
+    expect(app).toContain("cancelSessionToggle(row.dataset.nodeId)");
+    expect(app).toContain("await jump(row.dataset.sessionId)");
+    expect(app).toMatch(/svg\.addEventListener\("dblclick",[\s\S]*?\}, true\);/);
+
+    const render = readFileSync(resolve(root, "src", "render.ts"), "utf8");
+    expect(render).toContain('data-action="session"');
+    expect(render).toContain('data-inline-action="jump-session"');
   });
 });
