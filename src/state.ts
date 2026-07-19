@@ -266,6 +266,8 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
         .filter(Boolean)
         .slice(0, SESSION_TRAIL_ITEMS)
       : [];
+    const firstSeenFallback = validIso(raw.lastTranscriptAt, validIso(raw.updatedAt, at));
+    const firstSeenAt = validIso(raw.firstSeenAt, firstSeenFallback);
     const session: SessionRecord = {
       id,
       provider,
@@ -288,6 +290,7 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
       },
       status: enumValue(SESSION_STATUSES, raw.status, "unknown"),
       terminalOpen: raw.terminalOpen === true,
+      firstSeenAt,
       lastTranscriptAt: validIso(raw.lastTranscriptAt, at),
       lastStatusAt: validIso(raw.lastStatusAt, at),
       updatedAt: validIso(raw.updatedAt, at),
@@ -300,6 +303,7 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
     state.sessions[id] = session;
     if (
       cursor !== raw.cursor || hintedRoot !== raw.rootId || session.mainline !== raw.mainline
+      || firstSeenAt !== raw.firstSeenAt
       || !isRecord(raw.snapshot) || summary !== snapshotRaw.summary || progress !== (snapshotRaw.progress ?? "")
       || trail.length !== (Array.isArray(snapshotRaw.trail) ? snapshotRaw.trail.length : 0)
     ) repaired = true;

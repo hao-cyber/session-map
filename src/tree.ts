@@ -104,6 +104,7 @@ function createSession(meta: TranscriptMeta, at: string): SessionRecord {
     },
     status: "unknown",
     terminalOpen: false,
+    firstSeenAt: at,
     lastTranscriptAt: new Date(meta.mtimeMs).toISOString(),
     lastStatusAt: at,
     updatedAt: at,

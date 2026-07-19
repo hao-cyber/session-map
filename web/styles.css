@@ -346,7 +346,9 @@ textarea:focus-visible {
   letter-spacing: 0.065em;
   text-transform: uppercase;
 }
+.session-state-line { display: inline-flex; align-items: baseline; gap: 4px; white-space: nowrap; }
 .session-state-word { color: var(--ink-soft); font-size: 10px; font-weight: 680; }
+.session-time { color: var(--muted); font-size: 10px; font-weight: 500; }
 .session-context-toggle {
   min-width: 42px;
   min-height: 32px;

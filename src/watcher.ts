@@ -131,6 +131,7 @@ function sessionFromMeta(meta: TranscriptMeta, existing?: SessionRecord): Sessio
     ...(existing?.terminalHandle ? { terminalHandle: existing.terminalHandle } : {}),
     ...(existing?.paneKey ? { paneKey: existing.paneKey } : {}),
     ...(existing?.pid ? { pid: existing.pid } : {}),
+    firstSeenAt: existing?.firstSeenAt ?? at,
     lastTranscriptAt: new Date(meta.mtimeMs).toISOString(),
     lastStatusAt: existing?.lastStatusAt ?? at,
     updatedAt: at,

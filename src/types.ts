@@ -55,6 +55,7 @@ export interface SessionRecord {
   terminalHandle?: string;
   paneKey?: string;
   pid?: number;
+  firstSeenAt: string;
   lastTranscriptAt: string;
   lastStatusAt: string;
   updatedAt: string;

@@ -56,7 +56,7 @@ describe("durable state", () => {
     raw.sessions.s = {
       id: "s", provider: "claude", path: "p", cwd: "", title: "t", lastUser: "", mainline: "A", rootId: "a", cursor: "missing",
       ask: { kind: "none", hint: "" }, snapshot: { summary: "测试会话", progress: "检查修复", trail: [], at },
-      status: "unknown", terminalOpen: false, lastTranscriptAt: at, lastStatusAt: at, updatedAt: at,
+      status: "unknown", terminalOpen: false, firstSeenAt: at, lastTranscriptAt: at, lastStatusAt: at, updatedAt: at,
     };
     const result = repairState(raw);
     expect(result.repaired).toBeTrue();
@@ -87,6 +87,22 @@ describe("durable state", () => {
       trail: [],
       at,
     });
+    expect(result.state.sessions.legacy?.firstSeenAt).toBe(at);
+  });
+
+  test("keeps a session first-seen time stable across later transcript activity", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("stable-order", process.cwd());
+    await runtime.applyRoll(meta, { mainline: "稳定目录", ask: { kind: "none", hint: "" }, ops: [] });
+    const firstSeenAt = store.snapshot().sessions[meta.sessionId]!.firstSeenAt;
+
+    meta.mtimeMs += 60_000;
+    await runtime.applyRoll(meta, { mainline: "稳定目录", ask: { kind: "decision", hint: "确认" }, ops: [] });
+
+    const session = store.snapshot().sessions[meta.sessionId]!;
+    expect(session.firstSeenAt).toBe(firstSeenAt);
+    expect(session.lastTranscriptAt).toBe(new Date(meta.mtimeMs).toISOString());
   });
 
   test("preserves colliding root objects under distinct canonical names", () => {

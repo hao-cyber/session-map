@@ -44,6 +44,7 @@ export function sessionRecord(id: string, cwd: string): SessionRecord {
     snapshot: { summary: "安全会话", progress: "等待下一步", trail: [], at: now },
     status: "idle",
     terminalOpen: false,
+    firstSeenAt: now,
     lastTranscriptAt: now,
     lastStatusAt: now,
     updatedAt: now,

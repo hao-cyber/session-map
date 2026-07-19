@@ -75,6 +75,11 @@ SessionMap 不把任何模型摘要声明为不可变真理。它区分两种存
 
 `state.json` 同时保存思维树和 transcript offset。每次写入都使用当前状态目录内的私有临时文件，执行 `fsync` 后原子 rename。这样 watcher、服务或 roll 任一环节崩溃重启，都不需要从 transcript 总头重新推导状态。
 
+Session 首次进入状态时由 ingestion/runtime 写入 `firstSeenAt`，此后保持不变，作为同一主线
+内稳定目录顺序的唯一依据。`lastTranscriptAt` 继续随只读 transcript 活动更新，但只用于
+新近度展示与动作选择，不驱动目录换位。旧 schema 缺少 `firstSeenAt` 时，加载修复以
+已有 `lastTranscriptAt` 回填并随下一次原子写入持久化。
+
 Roll 故意采用 at-most-once：
 
 1. 读取并过滤一个有界增量；

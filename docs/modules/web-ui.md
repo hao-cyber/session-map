@@ -16,6 +16,8 @@
 
 - 第一层是主题，不得把 session 提升为一级对象。
 - Session 行同时保留整体主标题、最新有意义进展小标题、实时终端状态与动作入口。
+- 同一主题内的 Session 行按持久化 `firstSeenAt` 倒序排列；已有行不因 transcript 活动、
+  ask 或终端状态变化而换位。`lastTranscriptAt` 只以弱文字显示，不参与目录排序。
 - 展开后呈现 2–6 个因果脉络；主题全貌是独立入口，不混进单个 session。
 - URL fragment 只接收短期一次性 open ticket；页面同源兑换 capability 后写入当前 tab
   的 `sessionStorage` 并清理地址栏。公开根页面、URL、日志不得泄露长期 token。

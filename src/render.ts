@@ -27,7 +27,13 @@ function icon(name: string, label: string): string {
 function rootSessions(state: TrailState, rootId: string): SessionRecord[] {
   return Object.values(state.sessions)
     .filter((session) => session.rootId === rootId)
-    .sort((left, right) => Date.parse(right.lastTranscriptAt) - Date.parse(left.lastTranscriptAt));
+    .sort((left, right) => {
+      const byFirstSeen = Date.parse(right.firstSeenAt) - Date.parse(left.firstSeenAt);
+      if (byFirstSeen) return byFirstSeen;
+      if (left.provider !== right.provider) return left.provider < right.provider ? -1 : 1;
+      if (left.id === right.id) return 0;
+      return left.id < right.id ? -1 : 1;
+    });
 }
 
 function primarySession(sessions: SessionRecord[]): SessionRecord | undefined {
@@ -131,7 +137,7 @@ function sessionPresentationId(session: SessionRecord): string {
   return `session:${session.provider}:${session.id}`;
 }
 
-function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
+function topicSessionMarkup(state: TrailState, session: SessionRecord, now: number): string {
   const status = sessionState(session);
   const statusIcon = status.iconName
     ? icon(status.iconName, status.label)
@@ -154,7 +160,10 @@ function topicSessionMarkup(state: TrailState, session: SessionRecord): string {
     "</span>",
     '<span class="session-meta">',
     `<span class="session-provider">${escapeMarkdown(session.provider)}</span>`,
+    '<span class="session-state-line">',
     `<span class="session-state-word">${escapeMarkdown(status.label)}</span>`,
+    `<span class="session-time">· ${escapeMarkdown(relativeTime(session.lastTranscriptAt, now))}</span>`,
+    "</span>",
     "</span>",
     trailCount
       ? `<button type="button" class="session-context-toggle" data-inline-action="toggle-context" aria-label="展开 ${trailCount} 条 session 脉络">脉络 ${trailCount}</button>`
@@ -258,7 +267,7 @@ export function renderMarkdown(state: TrailState, now = Date.now()): string {
     // synthetic summary keeps the shared cross-session thought tree out of the
     // navigation layer while preserving progressive disclosure.
     for (const session of sessions) {
-      lines.push(`  - ${topicSessionMarkup(state, session)}`);
+      lines.push(`  - ${topicSessionMarkup(state, session, now)}`);
       for (const [index, breadcrumb] of session.snapshot.trail.entries()) {
         lines.push(
           `    - <span class="fm-line snapshot-trail" data-kind="snapshot" data-node-id="snapshot:${escapeHtml(session.provider)}:${escapeHtml(session.id)}:${index}"><span class="type-mark type-note" aria-hidden="true"></span><span>${escapeMarkdown(breadcrumb)}</span></span>`,

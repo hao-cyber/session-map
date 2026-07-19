@@ -144,6 +144,33 @@ describe("safe rendering and attention ordering", () => {
     expect(lines.some((line) => line.startsWith("    - ") && line.includes("原生壳增加维护成本，改用本地网页"))).toBeTrue();
   });
 
+  test("keeps session chronology stable while exposing last activity as metadata", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    await runtime.applyRoll(transcriptMeta("older", process.cwd()), {
+      mainline: "稳定时间线", ask: { kind: "none", hint: "" },
+      snapshot: { summary: "较早建立的入口", progress: "后来再次活跃", trail: [] }, ops: [],
+    });
+    await runtime.applyRoll(transcriptMeta("newer", process.cwd()), {
+      mainline: "稳定时间线", ask: { kind: "none", hint: "" },
+      snapshot: { summary: "较新建立的入口", progress: "保持固定位置", trail: [] }, ops: [],
+    });
+    const now = Date.parse("2026-07-19T12:00:00.000Z");
+    await store.update((state) => {
+      state.sessions.older!.firstSeenAt = "2026-07-19T10:00:00.000Z";
+      state.sessions.older!.lastTranscriptAt = "2026-07-19T11:59:30.000Z";
+      state.sessions.newer!.firstSeenAt = "2026-07-19T11:00:00.000Z";
+      state.sessions.newer!.lastTranscriptAt = "2026-07-19T11:30:00.000Z";
+    });
+
+    const markdown = renderMarkdown(store.snapshot(), now);
+    const sessions = markdown.split("\n").filter((line) => line.startsWith("  - ") && line.includes('data-kind="session"'));
+    expect(sessions[0]).toContain("较新建立的入口");
+    expect(sessions[0]).toContain("30 分钟前");
+    expect(sessions[1]).toContain("较早建立的入口");
+    expect(sessions[1]).toContain("刚刚");
+  });
+
   test("escapes every model-controlled rolling snapshot field", async () => {
     const store = new StateStore(directory());
     await new TreeRuntime(store).applyRoll(transcriptMeta("unsafe-snapshot", process.cwd()), {

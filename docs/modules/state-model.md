@@ -18,6 +18,8 @@
 - 节点只能追加、修订、衰减或归档，不能静默消失。
 - 已关闭判断不能原地复活；新证据必须生长新方向并保留修订关系。
 - 一个 transcript offset 至多消费一次；提交状态必须原子替换。
+- Session 的 `firstSeenAt` 只在首次创建时写入，后续活动不得改写；旧状态缺失该字段时
+  以已有 `lastTranscriptAt` 修复并持久化，不改变 session 对象、归属或 offset。
 - runtime 只校验 ID、schema、边界和副作用，不自行猜测语义。
 
 ## 验证
