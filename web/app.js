@@ -2,11 +2,7 @@
   "use strict";
 
   const POLL_MS = 4_000;
-  const SETTLE_MS = 300;
   const DRAG_THRESHOLD = 5;
-  if (new URLSearchParams(location.search).get("shell") === "mac") {
-    document.documentElement.dataset.shell = "mac";
-  }
   const API_HEADERS = {
     "X-SessionMap-Token": window.SESSIONMAP_TOKEN,
   };
@@ -36,13 +32,10 @@
   let seenAssetVersion = String(window.SESSIONMAP_ASSET_VERSION || "");
   let polling = false;
   let firstRender = true;
-  let settleTimer = 0;
   let saySessionId = "";
   let pointerStart = null;
   let pointerDragged = false;
-  let lastZoomK = 1;
   let suppressHash = false;
-  let viewportInteraction = false;
   let resizeTimer = 0;
   let manualFold = loadManualFold();
 
@@ -251,7 +244,6 @@
         toggleRecursively: false,
         zoom: true,
       });
-      attachZoomListener();
     }
     await mm.setData(transformed.root);
     decorateInteractiveRows();
@@ -261,7 +253,6 @@
       // tree — exactly when the user most needs a stable three-second view.
       await afterLayout();
       await mm.fit(1.12);
-      lastZoomK = window.d3.zoomTransform(svg).k;
       firstRender = false;
     } else {
       await afterLayout();
@@ -285,65 +276,7 @@
     }
   }
 
-  function attachZoomListener() {
-    mm.zoom.on("zoom.sessionmap", (event) => {
-      if (event?.sourceEvent) viewportInteraction = true;
-      window.clearTimeout(settleTimer);
-      settleTimer = window.setTimeout(applySemanticZoom, SETTLE_MS);
-    });
-  }
-
   window.SESSIONMAP_FIT = () => mm?.fit(1.12);
-
-  async function applySemanticZoom() {
-    if (!mm?.state?.data) return;
-    const transform = window.d3.zoomTransform(svg);
-    const zoomedOut = transform.k < lastZoomK - 0.03;
-    lastZoomK = transform.k;
-    const viewport = svg.getBoundingClientRect();
-    let changed = false;
-
-    walk(mm.state.data, (node, depth) => {
-      const id = extractNodeId(node);
-      if (!id || !node.children?.length || Object.prototype.hasOwnProperty.call(manualFold, id)) return;
-      let shouldFold = null;
-      if (zoomedOut && transform.k < 0.55 && depth >= 1) shouldFold = true;
-      else if (zoomedOut && transform.k < 1.05 && depth >= 2) shouldFold = true;
-      if (shouldFold !== null && Boolean(node.payload?.fold) !== shouldFold) {
-        node.payload = node.payload || {};
-        node.payload.fold = shouldFold;
-        changed = true;
-      }
-    });
-
-    if (viewportInteraction && transform.k >= 0.55) {
-      const marginX = viewport.width * 0.1;
-      const marginY = viewport.height * 0.1;
-      for (const group of svg.querySelectorAll("g.markmap-node.markmap-fold")) {
-        const line = group.querySelector("[data-node-id]");
-        const id = line?.dataset.nodeId;
-        if (!id || Object.prototype.hasOwnProperty.call(manualFold, id)) continue;
-        const rect = group.getBoundingClientRect();
-        const inside = rect.right >= viewport.left - marginX && rect.left <= viewport.right + marginX &&
-          rect.bottom >= viewport.top - marginY && rect.top <= viewport.bottom + marginY;
-        if (!inside) continue;
-        const node = dataById(id);
-        const content = String(node?.content || node?.payload?.content || "");
-        if (content.includes('data-default-fold="true"') && transform.k < 1.2) continue;
-        if (node?.payload?.fold) {
-          node.payload.fold = false;
-          changed = true;
-        }
-      }
-    }
-    if (changed) {
-      const anchor = centerAnchor();
-      await mm.renderData();
-      await afterLayout();
-      decorateInteractiveRows();
-      pinAnchor(anchor);
-    }
-  }
 
   function renderChrome(data) {
     statusLine.textContent = `${data.activeSessions} 个活跃 session · 更新于 ${relativeTime(data.updatedAt)}`;
@@ -575,7 +508,7 @@
       const circle = target instanceof Element ? target.closest("g.markmap-node > circle") : null;
       if (circle) {
         // Markmap owns the native circle toggle. Record its resulting state after
-        // its target listener runs so manual intent survives data refresh/LOD.
+        // its target listener runs so manual intent survives data refresh.
         window.setTimeout(() => {
           const node = circle.parentElement?.__data__;
           const id = extractNodeId(node);
@@ -636,12 +569,10 @@
   svg.addEventListener("dblclick", (event) => {
     if (rowFromEvent(event)) return;
     event.preventDefault();
-    viewportInteraction = false;
     mm?.fit(1.12);
   });
 
   document.getElementById("fit-button").addEventListener("click", () => {
-    viewportInteraction = false;
     mm?.fit(1.12);
   });
   archivedButton.addEventListener("click", () => { archiveDrawer.hidden = false; });
@@ -696,7 +627,6 @@
     window.clearTimeout(resizeTimer);
     resizeTimer = window.setTimeout(() => {
       if (!mm) return;
-      viewportInteraction = false;
       void mm.fit(1.08);
     }, 180);
   });
@@ -735,7 +665,7 @@
 
   function boot() {
     if (!window.SESSIONMAP_TOKEN) {
-      statusLine.textContent = "请从 SessionMap.app 或 sessionmap open 打开";
+      statusLine.textContent = "请运行 sessionmap open 安全打开本地页面";
       loading.querySelector("span:last-child").textContent = "此页面没有本地访问凭据";
       return;
     }

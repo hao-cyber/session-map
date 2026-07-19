@@ -100,11 +100,11 @@ describe("safe rendering and attention ordering", () => {
       mainline: "准备首发",
       ask: { kind: "decision", hint: "选择格式" },
       snapshot: {
-        summary: "构建签名发布包",
-        progress: "等待选择归档格式",
-        trail: ["pkg 需要额外证书，改用 app zip", "Developer ID 签名通过"],
+        summary: "构建本地网页发布流程",
+        progress: "等待选择安装引导",
+        trail: ["原生壳增加维护成本，改用本地网页", "standalone CLI 构建通过"],
       },
-      ops: [{ op: "grow", parent: "mainline", type: "task", label: "验证签名" }],
+      ops: [{ op: "grow", parent: "mainline", type: "task", label: "验证授权入口" }],
     });
     await runtime.applyRoll(second, {
       mainline: "准备首发",
@@ -117,11 +117,11 @@ describe("safe rendering and attention ordering", () => {
     const topic = lines.findIndex((line) => line.includes("data-kind=\"mainline\"") && line.includes("准备首发"));
     const sessions = lines.filter((line) => line.startsWith("  - ") && line.includes("data-kind=\"session\""));
     const summary = lines.findIndex((line) => line.includes("data-kind=\"thoughts\""));
-    const thought = lines.findIndex((line) => line.includes('data-kind="node"') && line.includes("验证签名"));
+    const thought = lines.findIndex((line) => line.includes('data-kind="node"') && line.includes("验证授权入口"));
     expect(topic).toBeGreaterThan(0);
     expect(sessions).toHaveLength(2);
-    expect(sessions[0]).toContain("构建签名发布包");
-    expect(sessions[0]).toContain("等待选择归档格式");
+    expect(sessions[0]).toContain("构建本地网页发布流程");
+    expect(sessions[0]).toContain("等待选择安装引导");
     expect(sessions[0]).toContain("脉络 2");
     expect(sessions[1]).toContain("复核发布流程");
     expect(lines.indexOf(sessions[0]!)).toBeGreaterThan(topic);
@@ -129,7 +129,7 @@ describe("safe rendering and attention ordering", () => {
     expect(lines[summary]).toContain('data-default-fold="true"');
     expect(summary).toBeLessThan(thought);
     expect(lines[thought]).toStartWith("    - ");
-    expect(lines.some((line) => line.startsWith("    - ") && line.includes("pkg 需要额外证书，改用 app zip"))).toBeTrue();
+    expect(lines.some((line) => line.startsWith("    - ") && line.includes("原生壳增加维护成本，改用本地网页"))).toBeTrue();
   });
 
   test("escapes every model-controlled rolling snapshot field", async () => {
@@ -260,6 +260,8 @@ describe("action safety and Orca matching", () => {
         }
         return {};
       },
+      readTranscriptProcesses: async () => { throw new Error("process inspection denied"); },
+      readProcesses: async () => { throw new Error("process inspection denied"); },
     });
     expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "orca-resume" });
     expect(store.snapshot().sessions[session.id]?.terminalHandle).toBe("created-handle");
@@ -322,7 +324,7 @@ describe("action safety and Orca matching", () => {
         return true;
       },
     });
-    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-focus" });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "system-focus" });
     expect(scripts).toHaveLength(1);
     expect(scripts[0]?.args).toEqual(["/dev/ttys007"]);
     expect(scripts[0]?.script).toContain("targetTTY");
@@ -343,7 +345,7 @@ describe("action safety and Orca matching", () => {
         return true;
       },
     });
-    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-resume" });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "system-resume" });
     expect(scripts).toHaveLength(1);
     expect(scripts[0]).toContain("shellCommand");
   });
@@ -362,11 +364,24 @@ describe("action safety and Orca matching", () => {
         return true;
       },
     });
-    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-resume" });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "system-resume" });
     expect(commands[0]).toContain("claude --resume 'closed-session'");
     const sent = await actions.say(session.id, "继续检查");
     expect(sent).toMatchObject({ ok: false, mode: "manual" });
     expect(sent.message).toContain("手动输入");
+  });
+
+  test("continues to system resume when process inspection is unavailable", async () => {
+    const store = new StateStore(directory());
+    const session = sessionRecord("restricted-process-inspection", process.cwd());
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => ({ available: false, agents: [], terminals: [] }),
+      readTranscriptProcesses: async () => { throw new Error("EPERM"); },
+      readProcesses: async () => { throw new Error("EPERM"); },
+      runAppleScript: async () => true,
+    });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "system-resume" });
   });
 });
 

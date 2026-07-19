@@ -52,8 +52,7 @@ Tree runtime（唯一写者）
 state.json + capability.token
         │
         ├─ loopback HTTP API / 本地静态资源
-        ├─ WKWebView 原生 macOS 主窗口
-        ├─ macOS 菜单栏状态入口
+        ├─ 系统浏览器中的 SessionMap
         └─ Orca / iTerm2 / Terminal 动作层
 ```
 
@@ -130,15 +129,19 @@ Session 动作使用确定的降级阶梯：
 
 无法完成时必须给出明确错误，不能让入口变成无反馈的假按钮。
 
-## 原生 macOS 与本地网页
+## 本地网页与服务
 
-原生应用是首要产品入口，负责窗口、菜单栏、生命周期、服务安装/修复与系统级命令。思维图仍由 vendored Markmap 在 WKWebView 中渲染，确保桌面窗口与浏览器诊断入口共享同一套交互语义。
+系统浏览器是唯一产品界面。Bun 服务同时负责 transcript watcher、状态写入、vendored
+Web 资产和受 capability 保护的 API；浏览器只持有读取与动作所需的当前 tab 凭据，
+不保存第二份业务状态。
 
-应用包内嵌架构对应的 Bun standalone backend。首次运行会安装当前用户的 launchd 服务；如果 launchd 暂时失败，应用可启动同一内嵌 backend 作为生命周期内的降级服务。浏览器入口始终保留，用于调试与无壳环境。
+服务可由 `sessionmap serve` 前台运行，也可用 standalone CLI 的 `sessionmap install`
+安装为当前用户的 launchd 服务。`sessionmap open` 负责打开授权页面。Terminal、iTerm
+和 Orca 仍是跳转/恢复适配层，但不构成原生 SessionMap 客户端。
 
 ## 本地安全边界
 
-服务只绑定 `127.0.0.1`。根页面不包含 capability token；原生 App 或
+服务只绑定 `127.0.0.1`。根页面不包含 capability token；
 `sessionmap open` 通过 URL fragment 把 token 引导到当前 tab 的 `sessionStorage`，
 并立即从地址栏清除。所有 `/api/*` 都要求该 token。状态变更请求还必须满足：
 

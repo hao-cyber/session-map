@@ -1,0 +1,26 @@
+# Session 跳转与恢复模块
+
+## 职责
+
+把每个 session 的实时运行状态和可靠动作暴露给读取层：运行时切换到原终端，关闭后
+恢复会话。Orca 可提升体验，但缺失时仍必须正常工作。
+
+## 代码入口
+
+- `src/actions.ts`：动作决策、实时进程重解析和安全降级顺序。
+- `src/orca.ts`：可选的 Orca 查询、切换、创建与发话。
+- `src/monitor.ts`：PID、TTY、cwd、provider 与 transcript 身份证据。
+- `src/server.ts`：受 capability 保护的动作 API。
+
+## 不变量
+
+- 点击必须真实切换或恢复，不能用无动作的视觉反馈冒充成功。
+- 每次动作前重新验证进程身份；不得信任持久化的陈旧 PID。
+- 模糊匹配必须同时满足 provider、cwd 且结果唯一；歧义时停止，不切错终端。
+- 降级顺序是精确 Orca → 精确系统 TTY → 安全的新终端恢复。
+- 测试关闭检测时只操作专用测试终端，绝不关闭用户其他终端。
+
+## 验证
+
+自动覆盖集中在 `tests/render-actions-server.test.ts` 和 `tests/monitor.test.ts`；发布前还要
+使用一个隔离的真实 Claude 或 Codex session 验证运行、切换、关闭与恢复。

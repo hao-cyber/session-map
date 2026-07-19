@@ -18,17 +18,21 @@ export type ProcessRow = { pid: number; tty: string; command: string };
 export type TranscriptProcessRow = ProcessRow & { sessionId: string };
 
 async function runText(command: string[], timeoutMs = 5_000): Promise<{ ok: boolean; text: string }> {
-  const proc = Bun.spawn(command, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
-  let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    proc.kill();
-  }, timeoutMs);
-  const [stdout, exitCode] = await Promise.all([
-    new Response(proc.stdout).text(),
-    proc.exited,
-  ]).finally(() => clearTimeout(timer));
-  return { ok: !timedOut && exitCode === 0, text: stdout };
+  try {
+    const proc = Bun.spawn(command, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      proc.kill();
+    }, timeoutMs);
+    const [stdout, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      proc.exited,
+    ]).finally(() => clearTimeout(timer));
+    return { ok: !timedOut && exitCode === 0, text: stdout };
+  } catch {
+    return { ok: false, text: "" };
+  }
 }
 
 async function readClaudeAgents(): Promise<ClaudeAgent[]> {

@@ -29,7 +29,7 @@ SESSIONMAP_DEV=1 bun src/cli.ts serve \
 bun src/cli.ts open --state-dir /tmp/sessionmap-demo
 ```
 
-至少检查首次打开、Fit、缩放 LOD、手动折叠、归档/撤销、窄窗口与 macOS 壳模式。截图应确认层级、间距、裁切、重叠和状态色语义。
+至少检查首次打开、Fit、缩放 LOD、手动折叠、归档/撤销与窄浏览器窗口。截图应确认层级、间距、裁切、重叠和状态色语义。
 
 ## 不接受的方向
 

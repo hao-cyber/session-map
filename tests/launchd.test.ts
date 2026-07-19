@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { LAUNCHD_LABEL, LEGACY_LAUNCHD_LABEL, installedExecutablePath, launchArguments, launchdPlist } from "../src/launchd.ts";
+import { LAUNCHD_LABEL, LEGACY_LAUNCHD_LABEL, SERVICE_START_TIMEOUT_MS, installedExecutablePath, launchArguments, launchdPlist } from "../src/launchd.ts";
 
 describe("launchd distribution", () => {
   test("uses source files under Bun but a stable user bin for compiled releases", () => {
@@ -25,12 +24,7 @@ describe("launchd distribution", () => {
     expect(plist).toContain(`<key>Label</key><string>${LAUNCHD_LABEL}</string>`);
     expect(LAUNCHD_LABEL).toBe("com.haocyber.sessionmap.service");
     expect(LEGACY_LAUNCHD_LABEL).toBe("io.maintrail.service");
+    expect(SERVICE_START_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
   });
 
-  test("generates a Homebrew 6 compatible minimum macOS dependency", () => {
-    const releaseScript = readFileSync(new URL("../scripts/release-macos.ts", import.meta.url), "utf8");
-    expect(releaseScript).toContain("depends_on macos: :ventura");
-    expect(releaseScript).not.toContain('depends_on macos: \">= :ventura\"');
-    expect(releaseScript).not.toContain('"io.maintrail.service"');
-  });
 });

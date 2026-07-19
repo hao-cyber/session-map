@@ -7,6 +7,7 @@ import { defaultStateDirectory, legacyStateDirectory, sleep } from "./utils.ts";
 
 export const LAUNCHD_LABEL = "com.haocyber.sessionmap.service";
 export const LEGACY_LAUNCHD_LABEL = "io.maintrail.service";
+export const SERVICE_START_TIMEOUT_MS = 30_000;
 
 function xml(value: string): string {
   return value
@@ -86,7 +87,7 @@ export function launchAgentPath(label = LAUNCHD_LABEL): string {
   return join(homedir(), "Library", "LaunchAgents", `${label}.plist`);
 }
 
-async function waitForService(timeoutMs = 8_000): Promise<boolean> {
+async function waitForService(timeoutMs = SERVICE_START_TIMEOUT_MS): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {

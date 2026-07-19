@@ -7,7 +7,7 @@ import { controlSafe, isRecord, truncateChars } from "./utils.ts";
 
 export interface ActionResult {
   ok: boolean;
-  mode: "orca-switch" | "orca-resume" | "native-focus" | "native-resume" | "manual" | "error";
+  mode: "orca-switch" | "orca-resume" | "system-focus" | "system-resume" | "manual" | "error";
   message: string;
 }
 
@@ -154,8 +154,8 @@ export class ActionRouter {
       // original agent exited. Re-resolve the process from exact live evidence
       // on every click before deriving a TTY and focusing another application.
       const [transcriptProcesses, processes] = await Promise.all([
-        this.dependencies.readTranscriptProcesses(),
-        this.dependencies.readProcesses(),
+        this.dependencies.readTranscriptProcesses().catch(() => []),
+        this.dependencies.readProcesses().catch(() => []),
       ]);
       const transcriptProcess = transcriptProcesses.find((candidate) => candidate.sessionId === session.id);
       const process = transcriptProcess ?? processForSession(session, processes);
@@ -163,7 +163,7 @@ export class ActionRouter {
       if (pid) {
         const tty = await ttyForPid(pid, this.dependencies.runText);
         if (tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
-          return { ok: true, mode: "native-focus", message: "已聚焦系统终端" };
+          return { ok: true, mode: "system-focus", message: "已聚焦系统终端" };
         }
       }
       if (orcaMatch.ambiguous) {
@@ -202,7 +202,7 @@ export class ActionRouter {
       }
       const command = resumeCommand(session);
       if (await this.dependencies.runAppleScript(RESUME_SCRIPT, [controlSafe(command)])) {
-        return { ok: true, mode: "native-resume", message: "已在系统终端复活 session" };
+        return { ok: true, mode: "system-resume", message: "已在系统终端复活 session" };
       }
       return { ok: false, mode: "error", message: "无法聚焦或复活该 session" };
     } catch (error) {

@@ -29,4 +29,20 @@ describe("offline browser bundle", () => {
     expect(css).toContain("#mindmap foreignObject { overflow: hidden; }");
     expect(css).not.toContain("#mindmap foreignObject { overflow: visible; }");
   });
+
+  test("keeps viewport navigation separate from user-controlled disclosure", () => {
+    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    expect(app).toContain("async function toggleNodeById(id)");
+    expect(app).toContain("manualFold[id] = next");
+    expect(app).toContain("saveManualFold()");
+    expect(app).not.toContain("applySemanticZoom");
+    expect(app).not.toContain('mm.zoom.on("zoom.sessionmap"');
+    expect(app).not.toMatch(/transform\.k\s*[<>]/);
+
+    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
+    expect(html).toContain("拖动画布");
+    expect(html).toContain("滚轮缩放");
+    expect(html).toContain("点击展开");
+    expect(html).not.toContain("<span>全景</span><i></i><span>转折</span>");
+  });
 });

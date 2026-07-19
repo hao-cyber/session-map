@@ -90,19 +90,19 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
     "claude",
     cwd,
     "准备 SessionMap 首发",
-    "需要决定首发是签名 zip 还是 pkg",
+    "需要决定本地网页的安装引导",
   );
   const releaseRoot = await apply(runtime, release, {
     mainline: "准备 SessionMap 首发",
-    ask: { kind: "decision", hint: "选择首发包格式" },
+    ask: { kind: "decision", hint: "选择本地安装引导" },
     snapshot: {
-      summary: "完成 SessionMap macOS 首发",
-      progress: "签名链可用，待决定首发包格式",
-      trail: ["目标：Homebrew 安装", "已验证 Developer ID", "当前需选择 app zip 或 pkg"],
+      summary: "完成 SessionMap 本地网页首发",
+      progress: "standalone CLI 可用，待收敛安装引导",
+      trail: ["目标：本地网页开箱即用", "已验证后台常驻", "当前需收敛 install 与 open 指引"],
     },
     ops: [
-      { op: "grow", parent: "mainline", type: "decision", label: "选择首发包格式" },
-      { op: "grow", parent: "mainline", type: "task", label: "验证公证凭据链" },
+      { op: "grow", parent: "mainline", type: "decision", label: "选择本地安装引导" },
+      { op: "grow", parent: "mainline", type: "task", label: "验证浏览器授权入口" },
     ],
   });
 

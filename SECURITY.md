@@ -18,10 +18,10 @@ SessionMap 会读取本机 AI coding agent transcript，并能在用户显式操
 
 - 被监控的 JSONL 永远只读打开。
 - `/api/*` 全部要求权限为 `0600` 的 capability token。公开根页面不包含 token；
-  SessionMap.app 或 `sessionmap open` 仅通过不会发送给服务端的 URL fragment 把它
+  `sessionmap open` 仅通过不会发送给服务端的 URL fragment 把它
   引导到当前 tab，写入 `sessionStorage` 后立即清理地址栏。
 - POST 只接受 loopback Origin、`application/json`、不超过 64 KiB 的 JSON object。
 - 页面和 Markdown 对 HTML 与 Markdown 元字符做双层转义。
 - 模型 op 必须通过 schema、主线子树授权和 reattach 写边界。
 - 跳转、复活、发话只允许来自本机页面的显式交互。
-- 应用不包含 CDN、遥测或外部数据上报。
+- Web runtime 不包含 CDN、遥测或外部数据上报。

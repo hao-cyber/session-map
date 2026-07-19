@@ -61,15 +61,7 @@ textarea:focus-visible,
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(20px) saturate(1.2);
-  -webkit-app-region: drag;
 }
-
-html[data-shell="mac"] .topbar { padding-left: 86px; }
-
-.topbar button,
-.topbar select,
-.topbar label,
-.git-chip { -webkit-app-region: no-drag; }
 
 .brand-block {
   min-width: 0;

@@ -192,9 +192,8 @@ export class SessionMapHttpServer {
     return `http://${this.hostname}:${this.server.port}`;
   }
 
-  browserUrl(shell = false): string {
-    const query = shell ? "?shell=mac" : "";
-    return `${this.url}/${query}#cap=${encodeURIComponent(this.token)}`;
+  browserUrl(): string {
+    return `${this.url}/#cap=${encodeURIComponent(this.token)}`;
   }
 
   stop(): void {
