@@ -120,6 +120,12 @@ function sessionFromMeta(meta: TranscriptMeta, existing?: SessionRecord): Sessio
     rootId: existing?.rootId ?? null,
     cursor: existing?.cursor ?? null,
     ask: existing?.ask ?? { kind: "none", hint: "" },
+    snapshot: existing?.snapshot ?? {
+      summary: meta.title || `${meta.provider}:${meta.sessionId.slice(0, 8)}`,
+      progress: "等待首次语义快照",
+      trail: [],
+      at,
+    },
     status: existing?.status ?? "unknown",
     terminalOpen: existing?.terminalOpen ?? false,
     ...(existing?.terminalHandle ? { terminalHandle: existing.terminalHandle } : {}),

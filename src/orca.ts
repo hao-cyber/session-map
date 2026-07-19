@@ -34,7 +34,7 @@ export interface OrcaSessionMatch {
 
 export function orcaPath(): string | null {
   const candidates = [
-    process.env.MAINTRAIL_ORCA ?? "",
+    process.env.SESSIONMAP_ORCA ?? "",
     Bun.which("orca") ?? "",
     "/Applications/Orca.app/Contents/Resources/bin/orca",
     `${process.env.HOME ?? ""}/Applications/Orca.app/Contents/Resources/bin/orca`,
@@ -130,6 +130,20 @@ function samePrompt(left: string, right: string): boolean {
 }
 
 export function matchOrcaSession(session: SessionRecord, snapshot: OrcaSnapshot): OrcaSessionMatch {
+  const rememberedTerminal = session.terminalHandle
+    ? snapshot.terminals.find((candidate) => candidate.handle === session.terminalHandle)
+    : session.paneKey
+      ? snapshot.terminals.find((candidate) => candidate.paneKey === session.paneKey)
+      : undefined;
+  if (rememberedTerminal) {
+    const agent = snapshot.agents.find((candidate) => candidate.paneKey === rememberedTerminal.paneKey);
+    return {
+      ...(agent ? { agent } : {}),
+      terminal: rememberedTerminal,
+      paneKey: rememberedTerminal.paneKey,
+    };
+  }
+
   let agent = snapshot.agents.find((candidate) => samePrompt(session.lastUser, candidate.prompt));
   if (!agent && session.title) {
     const title = normalizeText(stripSpinner(session.title));

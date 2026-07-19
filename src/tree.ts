@@ -3,12 +3,17 @@ import {
   MAX_OPS,
   NODE_LABEL_CHARS,
   NODE_TYPES,
+  SESSION_PROGRESS_CHARS,
+  SESSION_SUMMARY_CHARS,
+  SESSION_TRAIL_ITEM_CHARS,
+  SESSION_TRAIL_ITEMS,
 } from "./constants.ts";
 import type {
   ApplyResult,
   AskKind,
   RollOutput,
   SessionRecord,
+  SessionSnapshot,
   TrailNode,
   TrailState,
   TranscriptMeta,
@@ -56,6 +61,28 @@ function validAsk(raw: unknown): { kind: AskKind; hint: string } {
   return { kind, hint: Array.from(normalizeText(raw.hint)).slice(0, 16).join("") };
 }
 
+function validSnapshot(
+  raw: unknown,
+  previous: SessionSnapshot,
+  fallbackTitle: string,
+  at: string,
+): SessionSnapshot {
+  if (!isRecord(raw)) return previous;
+  const summary = Array.from(normalizeText(raw.summary)).slice(0, SESSION_SUMMARY_CHARS).join("")
+    || previous.summary
+    || Array.from(normalizeText(fallbackTitle)).slice(0, SESSION_SUMMARY_CHARS).join("");
+  const progress = Array.from(normalizeText(raw.progress)).slice(0, SESSION_PROGRESS_CHARS).join("")
+    || previous.progress;
+  const trail = Array.isArray(raw.trail)
+    ? raw.trail
+      .filter((item): item is string => typeof item === "string")
+      .map((item) => Array.from(normalizeText(item)).slice(0, SESSION_TRAIL_ITEM_CHARS).join(""))
+      .filter(Boolean)
+      .slice(0, SESSION_TRAIL_ITEMS)
+    : previous.trail;
+  return { summary, progress, trail, at };
+}
+
 function createSession(meta: TranscriptMeta, at: string): SessionRecord {
   return {
     id: meta.sessionId,
@@ -68,6 +95,13 @@ function createSession(meta: TranscriptMeta, at: string): SessionRecord {
     rootId: null,
     cursor: null,
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: Array.from(normalizeText(meta.title)).slice(0, SESSION_SUMMARY_CHARS).join("")
+        || `${meta.provider}:${meta.sessionId.slice(0, 8)}`,
+      progress: "等待首次语义快照",
+      trail: [],
+      at,
+    },
     status: "unknown",
     terminalOpen: false,
     lastTranscriptAt: new Date(meta.mtimeMs).toISOString(),
@@ -107,6 +141,7 @@ export class TreeRuntime {
         rootId,
         cursor: previous.rootId === rootId && previous.cursor ? previous.cursor : rootId,
         ask: validAsk(rawOutput.ask),
+        snapshot: validSnapshot(rawOutput.snapshot, previous.snapshot, meta.title || previous.title, at),
         lastTranscriptAt: new Date(meta.mtimeMs).toISOString(),
         updatedAt: at,
       };
@@ -184,6 +219,10 @@ export class TreeRuntime {
             reject("close state must be resolved or dead");
             return;
           }
+          if (node.state === "resolved" || node.state === "dead") {
+            reject("closed nodes preserve their recorded outcome; grow a revised direction instead");
+            return;
+          }
           node.state = unknownOp.state as "resolved" | "dead";
           const note = canonicalNote(unknownOp.note);
           if (note) node.note = note;
@@ -192,6 +231,10 @@ export class TreeRuntime {
           return;
         }
         if (op === "block") {
+          if (node.state === "resolved" || node.state === "dead") {
+            reject("closed nodes cannot be blocked; grow a revised direction instead");
+            return;
+          }
           const note = canonicalNote(unknownOp.note);
           if (!note) {
             reject("block requires a note");
@@ -204,6 +247,10 @@ export class TreeRuntime {
           return;
         }
         if (op === "unblock") {
+          if (node.state !== "waiting") {
+            reject("only waiting nodes can be unblocked");
+            return;
+          }
           node.state = "active";
           delete node.blockedNote;
           node.updatedAt = at;

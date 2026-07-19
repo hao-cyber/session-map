@@ -75,7 +75,7 @@ export class AssetStore {
 
   constructor() {
     this.webRoot = resolve(join(dirname(import.meta.path), "..", "web"));
-    this.development = process.env.MAINTRAIL_DEV === "1" && existsSync(join(this.webRoot, "index.html"));
+    this.development = process.env.SESSIONMAP_DEV === "1" && existsSync(join(this.webRoot, "index.html"));
   }
 
   get(name: string): Asset | null {

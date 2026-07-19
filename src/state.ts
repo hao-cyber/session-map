@@ -23,6 +23,10 @@ import {
   NODE_TYPES,
   PROVIDERS,
   SCHEMA_VERSION,
+  SESSION_PROGRESS_CHARS,
+  SESSION_SUMMARY_CHARS,
+  SESSION_TRAIL_ITEM_CHARS,
+  SESSION_TRAIL_ITEMS,
 } from "./constants.ts";
 import { Logger } from "./logger.ts";
 import type {
@@ -245,12 +249,29 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
     const allowed = hintedRoot ? descendants(state.nodes, hintedRoot) : new Set<string>();
     const cursor = typeof raw.cursor === "string" && allowed.has(raw.cursor) ? raw.cursor : hintedRoot;
     const askRaw = isRecord(raw.ask) ? raw.ask : {};
+    const snapshotRaw = isRecord(raw.snapshot) ? raw.snapshot : {};
+    const fallbackTitle = truncateChars(normalizeText(raw.title) || `${provider}:${id.slice(0, 8)}`, 100);
+    const summary = truncateChars(
+      normalizeText(snapshotRaw.summary) || normalizeText(raw.summary) || fallbackTitle,
+      SESSION_SUMMARY_CHARS,
+    );
+    const progress = truncateChars(
+      normalizeText(snapshotRaw.progress) || normalizeText(raw.progress),
+      SESSION_PROGRESS_CHARS,
+    );
+    const trail = Array.isArray(snapshotRaw.trail)
+      ? snapshotRaw.trail
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => truncateChars(normalizeText(item), SESSION_TRAIL_ITEM_CHARS))
+        .filter(Boolean)
+        .slice(0, SESSION_TRAIL_ITEMS)
+      : [];
     const session: SessionRecord = {
       id,
       provider,
       path: typeof raw.path === "string" ? raw.path : "",
       cwd: typeof raw.cwd === "string" ? raw.cwd : "",
-      title: truncateChars(normalizeText(raw.title) || `${provider}:${id.slice(0, 8)}`, 100),
+      title: fallbackTitle,
       lastUser: truncateChars(typeof raw.lastUser === "string" ? raw.lastUser : "", 2_000),
       mainline: hintedRoot ? state.nodes[hintedRoot]!.label : null,
       rootId: hintedRoot,
@@ -258,6 +279,12 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
       ask: {
         kind: enumValue(ASK_KINDS, askRaw.kind, "none") as AskKind,
         hint: truncateChars(normalizeText(askRaw.hint), 16),
+      },
+      snapshot: {
+        summary,
+        progress,
+        trail,
+        at: validIso(snapshotRaw.at, validIso(raw.updatedAt, at)),
       },
       status: enumValue(SESSION_STATUSES, raw.status, "unknown"),
       terminalOpen: raw.terminalOpen === true,
@@ -271,7 +298,11 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
     if (paneKey) session.paneKey = paneKey;
     if (typeof raw.pid === "number" && Number.isSafeInteger(raw.pid) && raw.pid > 0) session.pid = raw.pid;
     state.sessions[id] = session;
-    if (cursor !== raw.cursor || hintedRoot !== raw.rootId || session.mainline !== raw.mainline) repaired = true;
+    if (
+      cursor !== raw.cursor || hintedRoot !== raw.rootId || session.mainline !== raw.mainline
+      || !isRecord(raw.snapshot) || summary !== snapshotRaw.summary || progress !== (snapshotRaw.progress ?? "")
+      || trail.length !== (Array.isArray(snapshotRaw.trail) ? snapshotRaw.trail.length : 0)
+    ) repaired = true;
   }
 
   const rawOffsets = isRecord(input.offsets) ? input.offsets : {};

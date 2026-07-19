@@ -2,16 +2,18 @@
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { MaintrailApp } from "./app.ts";
+import { SessionMapApp } from "./app.ts";
+import { DEFAULT_PORT } from "./constants.ts";
 import { seedDemo } from "./demo.ts";
 import { installLaunchAgent, uninstallLaunchAgent } from "./launchd.ts";
 import { Logger } from "./logger.ts";
+import { ensureCapabilityToken } from "./server.ts";
 import { InstanceLock, StateStore } from "./state.ts";
 import { TreeRuntime } from "./tree.ts";
-import { stateDirectory } from "./utils.ts";
+import { defaultStateDirectory, stateDirectory } from "./utils.ts";
 import { TranscriptWatcher } from "./watcher.ts";
 
-const VERSION = typeof __MAINTRAIL_VERSION__ === "string" ? __MAINTRAIL_VERSION__ : "0.1.0-dev";
+const VERSION = typeof __SESSIONMAP_VERSION__ === "string" ? __SESSIONMAP_VERSION__ : "0.1.0-dev";
 
 type Parsed = {
   command: string;
@@ -48,17 +50,18 @@ function parse(argv: string[]): Parsed {
 }
 
 function help(): void {
-  console.log(`Maintrail ${VERSION} — persistent thinking map for parallel coding agents
+  console.log(`SessionMap ${VERSION} — persistent thinking map for parallel coding agents
 
 Usage:
-  maintrail serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch]
-  maintrail once [--state-dir PATH]
-  maintrail demo [--state-dir PATH]
-  maintrail install [--state-dir PATH]
-  maintrail uninstall
-  maintrail status [--state-dir PATH]
+  sessionmap serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch]
+  sessionmap open [--port 4317] [--state-dir PATH]
+  sessionmap once [--state-dir PATH]
+  sessionmap demo [--state-dir PATH]
+  sessionmap install [--state-dir PATH]
+  sessionmap uninstall
+  sessionmap status [--state-dir PATH]
 
-State defaults to ~/.maintrail. The HTTP service binds only to 127.0.0.1.`);
+State defaults to ~/Library/Application Support/SessionMap. The HTTP service binds only to 127.0.0.1.`);
 }
 
 async function openBrowser(url: string): Promise<void> {
@@ -68,14 +71,14 @@ async function openBrowser(url: string): Promise<void> {
 }
 
 async function serve(options: Parsed): Promise<void> {
-  const app = new MaintrailApp({
+  const app = new SessionMapApp({
     stateDirectory: options.stateDirectory,
     watch: options.watch,
     ...(options.port !== undefined ? { port: options.port } : {}),
   });
   app.start();
-  console.log(`Maintrail is available at ${app.http.url}`);
-  if (options.open) void openBrowser(app.http.url);
+  console.log(`SessionMap is available at ${app.http.url}`);
+  if (options.open) void openBrowser(app.http.browserUrl());
   await new Promise<void>((resolve) => {
     const close = (): void => {
       app.stop();
@@ -84,6 +87,12 @@ async function serve(options: Parsed): Promise<void> {
     process.once("SIGINT", close);
     process.once("SIGTERM", close);
   });
+}
+
+async function openInstalled(options: Parsed): Promise<void> {
+  const token = ensureCapabilityToken(options.stateDirectory).token;
+  const port = options.port ?? DEFAULT_PORT;
+  await openBrowser(`http://127.0.0.1:${port}/#cap=${encodeURIComponent(token)}`);
 }
 
 async function once(options: Parsed): Promise<void> {
@@ -102,8 +111,8 @@ async function once(options: Parsed): Promise<void> {
 }
 
 async function demo(options: Parsed): Promise<void> {
-  const explicit = process.argv.includes("--state-dir") || Boolean(process.env.MAINTRAIL_STATE_DIR);
-  const directory = explicit ? options.stateDirectory : join(homedir(), ".maintrail-demo");
+  const explicit = process.argv.includes("--state-dir") || Boolean(process.env.SESSIONMAP_STATE_DIR);
+  const directory = explicit ? options.stateDirectory : `${defaultStateDirectory()} Demo`;
   const lock = new InstanceLock(directory);
   lock.acquire();
   try {
@@ -113,12 +122,12 @@ async function demo(options: Parsed): Promise<void> {
     lock.release();
   }
   console.log(`Demo state written to ${directory}`);
-  console.log(`Run: maintrail serve --state-dir ${JSON.stringify(directory)} --no-watch`);
+  console.log(`Run: sessionmap serve --state-dir ${JSON.stringify(directory)} --no-watch`);
 }
 
 async function status(options: Parsed): Promise<void> {
   if (!existsSync(join(options.stateDirectory, "state.json"))) {
-    console.log("Maintrail has no state yet.");
+    console.log("SessionMap has no state yet.");
     return;
   }
   const state = new StateStore(options.stateDirectory).snapshot();
@@ -137,10 +146,11 @@ async function main(): Promise<void> {
   if (options.command === "help") help();
   else if (options.command === "version") console.log(VERSION);
   else if (options.command === "serve") await serve(options);
+  else if (options.command === "open") await openInstalled(options);
   else if (options.command === "once") await once(options);
   else if (options.command === "demo") await demo(options);
   else if (options.command === "install") console.log(`Installed ${await installLaunchAgent(options.stateDirectory)}`);
-  else if (options.command === "uninstall") console.log(await uninstallLaunchAgent() ? "Uninstalled Maintrail." : "Maintrail was not installed.");
+  else if (options.command === "uninstall") console.log(await uninstallLaunchAgent() ? "Uninstalled SessionMap." : "SessionMap was not installed.");
   else if (options.command === "status") await status(options);
   else throw new Error(`unknown command: ${options.command}`);
 }
@@ -150,4 +160,4 @@ main().catch((error) => {
   process.exitCode = 1;
 });
 
-declare const __MAINTRAIL_VERSION__: string;
+declare const __SESSIONMAP_VERSION__: string;

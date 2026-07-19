@@ -7,6 +7,10 @@ import {
   MAX_SUBTREE_LINES,
   ROLL_SENTINEL,
   ROLL_TIMEOUT_MS,
+  SESSION_PROGRESS_CHARS,
+  SESSION_SUMMARY_CHARS,
+  SESSION_TRAIL_ITEM_CHARS,
+  SESSION_TRAIL_ITEMS,
 } from "./constants.ts";
 import type {
   EngineAvailability,
@@ -18,10 +22,10 @@ import type {
 import { byteLength, isRecord, truncateBytes } from "./utils.ts";
 
 const ENGINE_ENV: Record<EngineName, string> = {
-  claude: "MAINTRAIL_CLAUDE",
-  codex: "MAINTRAIL_CODEX",
-  kimi: "MAINTRAIL_KIMI",
-  grok: "MAINTRAIL_GROK",
+  claude: "SESSIONMAP_CLAUDE",
+  codex: "SESSIONMAP_CODEX",
+  kimi: "SESSIONMAP_KIMI",
+  grok: "SESSIONMAP_GROK",
 };
 
 function executableCandidates(name: EngineName): string[] {
@@ -51,10 +55,11 @@ type AvailabilityReason = NonNullable<EngineAvailability["reason"]>;
 const AUTH_CACHE_MS = 60_000;
 const FAILURE_TTL_MS = 5 * 60_000;
 let authCache: { expiresAt: number; values: Map<EngineName, AvailabilityReason | null> } | null = null;
+let authRefresh: Promise<void> | null = null;
 const recentFailures = new Map<EngineName, number>();
 
 function authProbe(name: EngineName, executable: string): AvailabilityReason | null {
-  if (process.env.MAINTRAIL_SKIP_ENGINE_PROBES === "1") return null;
+  if (process.env.SESSIONMAP_SKIP_ENGINE_PROBES === "1") return null;
   if (name === "kimi") {
     return existsSync(join(process.env.HOME ?? "", ".kimi", "credentials", "kimi-code.json"))
       ? null
@@ -86,6 +91,111 @@ function authProbe(name: EngineName, executable: string): AvailabilityReason | n
   return result.status === 0 ? null : "auth-check-failed";
 }
 
+function authCommand(name: EngineName, executable: string): string[] | null {
+  if (name === "kimi") return null;
+  if (name === "claude") return [executable, "auth", "status"];
+  if (name === "codex") return [executable, "login", "status"];
+  return [executable, "models"];
+}
+
+function authResult(
+  name: EngineName,
+  exitCode: number | null,
+  stdout: string,
+  stderr: string,
+  failed: boolean,
+): AvailabilityReason | null {
+  if (failed || exitCode === null) return "auth-check-failed";
+  const output = `${stdout}\n${stderr}`;
+  if (name === "claude") {
+    try {
+      const status = JSON.parse(stdout) as { loggedIn?: boolean };
+      return exitCode === 0 && status.loggedIn === true ? null : "not-authenticated";
+    } catch {
+      return "auth-check-failed";
+    }
+  }
+  if (name === "codex") return exitCode === 0 && /logged in/i.test(output) ? null : "not-authenticated";
+  if (/not authenticated/i.test(output)) return "not-authenticated";
+  return exitCode === 0 ? null : "auth-check-failed";
+}
+
+async function authProbeAsync(name: EngineName, executable: string): Promise<AvailabilityReason | null> {
+  if (process.env.SESSIONMAP_SKIP_ENGINE_PROBES === "1") return null;
+  if (name === "kimi") {
+    return existsSync(join(process.env.HOME ?? "", ".kimi", "credentials", "kimi-code.json"))
+      ? null
+      : "not-authenticated";
+  }
+  const command = authCommand(name, executable);
+  if (!command) return "auth-check-failed";
+  const proc = Bun.spawn(command, { stdout: "pipe", stderr: "pipe", stdin: "ignore", env: process.env });
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    proc.kill();
+  }, 2_000);
+  try {
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ]);
+    return authResult(name, exitCode, stdout, stderr, timedOut);
+  } catch {
+    return "auth-check-failed";
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function availabilityFromCache(now: number, allowChecking: boolean): EngineAvailability[] {
+  return ENGINE_NAMES.map((name) => {
+    const path = enginePath(name);
+    if (!path) return { name, available: false, path, reason: "not-installed" };
+    const failedAt = recentFailures.get(name) ?? 0;
+    if (now - failedAt < FAILURE_TTL_MS) return { name, available: false, path, reason: "recent-failure" };
+    if (!authCache || authCache.expiresAt <= now || !authCache.values.has(name)) {
+      return allowChecking
+        ? { name, available: false, path, reason: "checking" }
+        : { name, available: true, path };
+    }
+    const reason = authCache.values.get(name) ?? null;
+    return reason ? { name, available: false, path, reason } : { name, available: true, path };
+  });
+}
+
+function refreshEngineAuth(): Promise<void> {
+  const now = Date.now();
+  if (authCache && authCache.expiresAt > now) return Promise.resolve();
+  if (authRefresh) return authRefresh;
+  authRefresh = (async () => {
+    const values = new Map<EngineName, AvailabilityReason | null>();
+    await Promise.all(ENGINE_NAMES.map(async (name) => {
+      const path = enginePath(name);
+      if (path) values.set(name, await authProbeAsync(name, path));
+    }));
+    authCache = { expiresAt: Date.now() + AUTH_CACHE_MS, values };
+  })().finally(() => { authRefresh = null; });
+  return authRefresh;
+}
+
+/**
+ * Immediate UI view of engine availability. Authentication probes run in the
+ * background so the first map snapshot is never held behind four external
+ * CLIs. The next four-second UI poll observes the populated cache.
+ */
+export function engineAvailabilitySnapshot(): EngineAvailability[] {
+  if (process.env.SESSIONMAP_SKIP_ENGINE_PROBES === "1") {
+    const values = new Map<EngineName, AvailabilityReason | null>();
+    for (const name of ENGINE_NAMES) if (enginePath(name)) values.set(name, null);
+    authCache = { expiresAt: Date.now() + AUTH_CACHE_MS, values };
+  } else {
+    void refreshEngineAuth();
+  }
+  return availabilityFromCache(Date.now(), true);
+}
+
 export function detectEngines(): EngineAvailability[] {
   const now = Date.now();
   if (!authCache || authCache.expiresAt <= now) {
@@ -96,14 +206,7 @@ export function detectEngines(): EngineAvailability[] {
     }
     authCache = { expiresAt: now + AUTH_CACHE_MS, values };
   }
-  return ENGINE_NAMES.map((name) => {
-    const path = enginePath(name);
-    if (!path) return { name, available: false, path, reason: "not-installed" };
-    const failedAt = recentFailures.get(name) ?? 0;
-    if (now - failedAt < FAILURE_TTL_MS) return { name, available: false, path, reason: "recent-failure" };
-    const reason = authCache?.values.get(name) ?? null;
-    return reason ? { name, available: false, path, reason } : { name, available: true, path };
-  });
+  return availabilityFromCache(now, false);
 }
 
 function rootLines(state: TrailState, rootId: string, maxLines: number): string[] {
@@ -139,7 +242,19 @@ function boundedMainlineList(state: TrailState, preferredRoot: string | null): s
   for (const rootId of roots) {
     const root = state.nodes[rootId];
     if (!root) continue;
-    const line = `- ${root.label}${state.archived.includes(rootId) ? " [archived]" : ""}\n`;
+    const sessions = Object.values(state.sessions)
+      .filter((session) => session.rootId === rootId)
+      .sort((left, right) => Date.parse(right.lastTranscriptAt) - Date.parse(left.lastTranscriptAt))
+      .slice(0, 3);
+    const summaries = sessions.map((session) => session.snapshot.summary).filter(Boolean);
+    const focuses = sessions
+      .map((session) => session.cursor ? state.nodes[session.cursor]?.label : undefined)
+      .filter((label): label is string => Boolean(label));
+    const anchors = [
+      summaries.length ? `sessions: ${summaries.join(" / ")}` : "",
+      focuses.length ? `focus: ${Array.from(new Set(focuses)).join(" / ")}` : "",
+    ].filter(Boolean).join(" | ");
+    const line = `- ${root.label}${state.archived.includes(rootId) ? " [archived]" : ""}${anchors ? ` | ${anchors}` : ""}\n`;
     if (byteLength(output + line) > 4_096) break;
     output += line;
   }
@@ -151,6 +266,9 @@ export function buildRollPrompt(state: TrailState, session: SessionRecord | unde
     ? rootLines(state, session.rootId, MAX_SUBTREE_LINES).join("\n")
     : "(session is not attached yet)";
   const mainlines = boundedMainlineList(state, session?.rootId ?? null);
+  const currentSnapshot = session
+    ? JSON.stringify(session.snapshot)
+    : "(no snapshot yet)";
   return `${ROLL_SENTINEL}
 
 You update a persistent external thinking tree for a developer who runs many coding agents in parallel.
@@ -165,11 +283,20 @@ MEMORY STANDARD
 - Do not record routine linear progress, narration, tool chatter, or every completed step.
 - A direction change is close(old node with a concrete reason) plus grow(new direction). Dead paths remain permanently useful.
 - Labels must be concrete enough for a human to recover context in three seconds. "音量假设已证伪" is useful; "调试进展" is not.
+- Earlier beliefs are not timeless facts. Preserve revision history structurally: close an outdated attempt with why it changed, then grow the revised direction. Never silently rewrite the path.
+- If later evidence makes a previously dead or resolved path useful again, do not unblock or rewrite that closed node. Grow a new "reconsidered because ..." direction so both judgments remain intelligible.
+
+ROLLING SESSION SNAPSHOT
+- snapshot is a revisable read projection, not the permanent source of truth. The tree records the non-erased thought trajectory.
+- snapshot.summary is a stable whole-session headline (what this session is really about), not the latest message. Keep it when still accurate; revise it when the session's meaning genuinely changes.
+- snapshot.progress is the newest meaningful state, result, blocker, or next move. It should answer "where is this session now?" without vague progress language.
+- snapshot.trail is 2-${SESSION_TRAIL_ITEMS} causal breadcrumbs for quick expansion: intent, decisive attempt/finding, rejected path, decision, and current direction. Prefer "A failed because B" over chronological narration.
 
 RUNTIME CONTRACT
 - Return one JSON object only, with no prose and no code fence.
 - At most ${MAX_OPS} ops.
 - mainline <= 48 characters; node labels <= 20 characters; ask.hint <= 16 characters.
+- snapshot.summary <= ${SESSION_SUMMARY_CHARS} characters; snapshot.progress <= ${SESSION_PROGRESS_CHARS}; each snapshot.trail item <= ${SESSION_TRAIL_ITEM_CHARS}.
 - Allowed node types: goal, task, attempt, finding, blocker, decision, note.
 - For grow at the root, parent may be the literal "mainline" or the exact mainline value. Prefer "mainline". Otherwise parent must be an existing node id from CURRENT SESSION SUBTREE.
 - Allowed ops:
@@ -180,16 +307,20 @@ RUNTIME CONTRACT
   {"op":"rename","node":"<node-id>","label":"..."}
   {"op":"refocus","node":"<node-id>"}
 - The runtime allocates ids and rejects cross-mainline writes. Never invent an id for an existing node.
+- unblock applies only to a waiting node. resolved/dead outcomes cannot be reopened; represent reconsideration with grow.
 - ask.kind is decision, review, reply, or none. This is a semantic judgment about what the user is being asked to do now.
 
 OUTPUT SHAPE
-{"mainline":"existing or new semantic mainline","ask":{"kind":"decision|review|reply|none","hint":"short"},"ops":[]}
+{"mainline":"existing or new semantic mainline","ask":{"kind":"decision|review|reply|none","hint":"short"},"snapshot":{"summary":"whole-session headline","progress":"latest meaningful state","trail":["causal breadcrumb"]},"ops":[]}
 
 EXISTING MAINLINES
 ${mainlines}
 
 CURRENT SESSION SUBTREE
 ${subtree}
+
+CURRENT REVISABLE SESSION SNAPSHOT
+${currentSnapshot}
 
 FILTERED TRANSCRIPT INCREMENT
 <delta>
@@ -207,6 +338,7 @@ function unwrapRoll(value: unknown): RollOutput | null {
           kind: typeof ask.kind === "string" ? (ask.kind as RollOutput["ask"]["kind"]) : "none",
           hint: typeof ask.hint === "string" ? ask.hint : "",
         },
+        ...(value.snapshot !== undefined ? { snapshot: value.snapshot } : {}),
         ops: value.ops,
       };
     }
@@ -343,7 +475,7 @@ export async function callRollEngine(
   delete env.CLAUDE_CODE_ENTRYPOINT;
   delete env.CODEX_THREAD_ID;
   delete env.CODEX_CI;
-  env.MAINTRAIL_ROLL = "1";
+  env.SESSIONMAP_ROLL = "1";
   const proc = Bun.spawn(plan.command, {
     cwd,
     env,

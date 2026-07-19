@@ -1,62 +1,164 @@
-# Maintrail architecture
+# SessionMap 架构说明
 
-## Product invariant
+## 产品不变量
 
-Maintrail is an external thinking tree. A mainline is one piece of work; a
-session is only a read-only source and a cursor into that tree. Killing a
-session cannot kill its object. Starting a replacement session must not create
-a replacement object.
+SessionMap 是外置思维树。主线是一件正在推进的工作；session 只是只读数据源和树上的光标。结束 session 不能删除它承载的对象，启动替代 session 也不能机械地创建替代对象。
 
-The three-second contract is answered in this order:
+“三秒恢复”按以下顺序回答：
 
-1. **What needs me now?** The now bar exposes decisions, replies, blockers, and
-   newly completed work before the map asks for navigation.
-2. **Where was the thought?** Stable mainlines, dead attempts, close reasons,
-   and cursors reconstruct the path without requiring recall.
-3. **How do I get back?** Every session affordance either focuses a live
-   terminal or resumes a closed one. Entries fade; they do not disappear.
+1. **现在什么最需要我？** now-bar 先显示等拍板、等回复、卡点与刚完成的新产出。
+2. **当时思考到哪里？** 稳定主线、失败尝试、close 原因、关键决定和 session 光标共同重建路径。
+3. **怎样回到那里？** 每个 session 入口都能聚焦还活着的终端，或复活已经关闭的终端。入口只衰减，不消失。
 
-## Authority split
+更完整的产品裁决依据见 [产品与设计宪章](product-design.md)。
 
-The model owns open semantics: mainline assignment, structural change,
-turning-point detection, and the meaning of an ask. Runtime code must never
-replace those judgments with cwd, keywords, or regexes.
+## 权限分工
 
-The runtime owns closed boundaries: ids, schema, subtree authorization,
-single-writer serialization, offsets, atomic persistence, idempotency policy,
-and every side effect. Model output is untrusted input.
+模型拥有开放语义：
 
-## Persistence and delivery semantics
+- session 归属哪条工作主线；
+- 哪些变化属于结构性转折；
+- ask 是 decision、review、reply 还是 none；
+- 节点标签如何具体表达当时的思考判断与修订关系。
 
-`state.json` contains both the thinking tree and transcript offsets. Every
-write uses a private temporary file, `fsync`, and atomic rename. Corrupt files
-are quarantined; repairable references are pruned without deleting surviving
-objects.
+Runtime 不得用 cwd、关键词、正则或其他机械规则替代上述判断。
 
-Roll delivery is deliberately at-most-once. A valid model response is obtained,
-then its source offset is committed, then operations are applied. A crash in
-the narrow middle window can lose one structural increment; it cannot repeat a
-non-idempotent `grow`.
+Runtime 拥有封闭边界：
 
-## Bounded work
+- ID 分配与 schema 校验；
+- 主线子树授权与 reattach 只读限制；
+- 单写者串行化；
+- transcript offset、原子持久化与幂等策略；
+- 跳转、复活、发话等所有副作用。
 
-Each source read is capped at 4 MiB. Lines over 2 MiB are skipped. The semantic
-delta is capped at 12 KiB, the current subtree at 120 lines, and a session rolls
-at most once every 45 seconds. Only the 60 most recently active transcript
-sessions are watched. Standard, environment-selected, and Orca-managed Codex
-homes are deduplicated by provider and session id; a durable offset follows the
-logical session when an identical WAL is mirrored under another path.
+模型输出始终是不可信输入。
 
-## Object permanence and archive
+## 组件关系
 
-Resolved and dead nodes remain facts. Archive moves a mainline out of the
-reading budget without stopping ingestion or deleting it. Session actions use
-a deterministic fallback ladder: Orca terminal, native terminal focus, then a
-new terminal running the provider's resume command.
+```text
+Claude / Codex transcript JSONL（只读、append-only）
+        │
+        ├─ watcher：发现文件变化、linger、冷却、60 session 上限
+        │
+        ├─ adapter：提取结构信号，过滤 thinking 与工具结果正文
+        │
+        ▼
+串行 roll worker
+        │  一次性调用选定模型，得到 mainline / ask / ops
+        ▼
+Tree runtime（唯一写者）
+        │  写边界、状态机、offset-before-apply、原子落盘
+        ▼
+state.json + capability.token
+        │
+        ├─ loopback HTTP API / 本地静态资源
+        ├─ WKWebView 原生 macOS 主窗口
+        ├─ macOS 菜单栏状态入口
+        └─ Orca / iTerm2 / Terminal 动作层
+```
 
-## Local security boundary
+Watcher 只采集与调度，永远不在轮询线程里等待慢模型。Roll CLI 是 one-shot、无状态执行器；树和 offset 才是持久状态来源。
 
-The server binds only to `127.0.0.1`. Every API call requires a 0600 capability
-token injected into the root page. State-changing requests additionally require
-an allowed loopback origin, strict JSON media type, a 64 KiB content limit, and
-an object body. Transcript files are never opened for writing.
+## 轨迹与滚动快照
+
+SessionMap 不把任何模型摘要声明为不可变真理。它区分两种存储职责：
+
+- 思考树保存不可静默抹除的历史轨迹。节点表达的是当时的尝试、发现、判断或决定；
+  后续可以证明它错误，但必须用 close 原因和新方向显式记录修订。
+- 每个 session 的 rolling snapshot 是可修订读取投影，包含整段 session 的稳定主标题、
+  最新进展小标题和最多六个因果路标。它为目录和三秒恢复服务，不承担历史审计职责。
+
+因此“保留历史”与“允许改变认识”并不冲突：系统拒绝的是无痕覆盖，而不是修订本身。
+状态机只允许 `waiting → active` 的 unblock。`resolved` / `dead` 是一次已经发生的历史
+结论；若它后来重新可行，模型必须 grow 一个带新证据的新方向，而不是重开旧节点。
+
+## 持久化与提交语义
+
+`state.json` 同时保存思维树和 transcript offset。每次写入都使用当前状态目录内的私有临时文件，执行 `fsync` 后原子 rename。这样 watcher、服务或 roll 任一环节崩溃重启，都不需要从 transcript 总头重新推导状态。
+
+Roll 故意采用 at-most-once：
+
+1. 读取并过滤一个有界增量；
+2. 获得并校验模型响应；
+3. 先提交源 offset；
+4. 再应用 ops 并原子落盘。
+
+第三、四步之间发生极端崩溃时，最多丢失一次结构增量，但不会重复非幂等的 `grow`。对外置记忆而言，重复制造假节点比少一次更新更难被人识别和修复。
+
+损坏的完整 JSON 会被隔离为 `.corrupt-<时间>` 后从空树恢复；字段缺失、悬空 children、自环或坏 cursor 等可修复损伤会被原地剪枝。加载路径不得进入 crash loop。
+
+## 有界工作量
+
+- 每次源文件读取最多 4 MiB；
+- 无换行巨行超过 2 MiB 时直接跳过；
+- 过滤后的语义增量硬上限 12 KiB；
+- 当前主线子树最多约 120 行；
+- 每轮最多 6 个 op；
+- 同一 session 至少冷却 45 秒；
+- 最多监控最近活跃的 60 个 transcript session。
+
+标准目录、环境变量目录与 Orca 管理的 Codex home 按 provider + session id 去重；同一 WAL 换路径时，逻辑 session 的持久 offset 会跟随它，避免重复生长。
+
+Adapter 保留用户原文、assistant 对话文本、工具名计数与工具错误；丢弃 thinking、工具结果正文、tool_use 参数和系统注入。SessionMap 自己发起的 roll prompt 带固定哨兵，adapter 同时识别新旧品牌哨兵，防止升级期间自噬。
+
+## 树写边界
+
+一次合法 roll 只能修改它最终归属主线的子树。Runtime 会拒绝：
+
+- 指向其他主线 node id 的 op；
+- 不存在、形状错误或类型非法的 op；
+- 对主线根执行 rename；
+- 超过长度或数量上限的字段；
+- 状态机不允许的 close / block / unblock；
+- 自环或重复 children。
+
+Session 从一条主线 reattach 到另一条主线的当轮，既有节点全部只读，只允许在新主线 grow 或把光标 refocus 到合法节点。这能阻止模型借“换主线”越权重写另一棵树。
+
+## 对象恒存、历史与归档
+
+resolved 和 dead 节点都是被明确记录过的历史判断，不会删除。新证据可以让当前快照
+改写并生长替代方向，但不能让旧判断无痕消失。同层三个以上已闭合叶子会在渲染层
+聚合成可展开的“历史”节点，减少阅读预算，但底层对象仍然完整。
+
+Archive 只把主线移出当前阅读面，不停止 ingestion，不删除历史。恢复和 toast 撤销都操作同一个稳定 root id。
+
+Session 动作使用确定的降级阶梯：
+
+1. Orca 中的现有 terminal；
+2. 按 TTY 精确匹配 iTerm2 / Terminal；
+3. 新建 terminal 执行 provider 的 resume 命令。
+
+无法完成时必须给出明确错误，不能让入口变成无反馈的假按钮。
+
+## 原生 macOS 与本地网页
+
+原生应用是首要产品入口，负责窗口、菜单栏、生命周期、服务安装/修复与系统级命令。思维图仍由 vendored Markmap 在 WKWebView 中渲染，确保桌面窗口与浏览器诊断入口共享同一套交互语义。
+
+应用包内嵌架构对应的 Bun standalone backend。首次运行会安装当前用户的 launchd 服务；如果 launchd 暂时失败，应用可启动同一内嵌 backend 作为生命周期内的降级服务。浏览器入口始终保留，用于调试与无壳环境。
+
+## 本地安全边界
+
+服务只绑定 `127.0.0.1`。根页面不包含 capability token；原生 App 或
+`sessionmap open` 通过 URL fragment 把 token 引导到当前 tab 的 `sessionStorage`，
+并立即从地址栏清除。所有 `/api/*` 都要求该 token。状态变更请求还必须满足：
+
+- Origin 的 scheme/host/port 属于允许的 loopback 页面；
+- media type 严格解析为 `application/json`；
+- `Content-Length` 不超过 64 KiB；
+- body 是 JSON object。
+
+模型标签、session 标题、git 字段都按不可信文本处理，先做 HTML escape，再实体化 Markdown 元字符，阻断 HTML 标签和 `x](javascript:...)` 两类注入。静态资源通过 realpath + 目录边界检查。Transcript 文件从不以写模式打开。
+
+## 升级迁移
+
+正式状态目录为 `~/Library/Application Support/SessionMap`，launchd label 为 `com.haocyber.sessionmap.service`。从旧版 Maintrail 升级时：
+
+1. 不覆盖已经存在的 SessionMap 状态；
+2. 在同一目标父目录内准备临时迁移目录；
+3. 只复制并验证 `state.json` 与合法 token；
+4. 原子 rename 成新状态目录；
+5. 启动新服务并检查 `/health`；
+6. 成功后移除旧 launchd plist 与旧 binary；
+7. 失败则删除本轮新目录并恢复旧服务。
+
+旧状态目录保留，不把安全回滚能力误当作应立即清理的垃圾。

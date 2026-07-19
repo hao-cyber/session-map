@@ -114,9 +114,15 @@ describe("transcript adapters", () => {
     expect(delta.text).toContain("ASSISTANT-END");
   });
 
-  test("marks Maintrail roll sessions for permanent self-exclusion", () => {
+  test("marks SessionMap roll sessions for permanent self-exclusion", () => {
     const { path } = fixture();
     writeJsonLines(path, [{ type: "user", sessionId: "self", message: { role: "user", content: `${ROLL_SENTINEL}\ninternal prompt` } }]);
+    expect(readTranscriptDelta(path, "claude").selfGenerated).toBeTrue();
+  });
+
+  test("continues excluding pre-rename roll sessions", () => {
+    const { path } = fixture();
+    writeJsonLines(path, [{ type: "user", sessionId: "legacy-self", message: { role: "user", content: "MAINTRAIL_ROLL_V1_DO_NOT_INGEST" } }]);
     expect(readTranscriptDelta(path, "claude").selfGenerated).toBeTrue();
   });
 
@@ -138,10 +144,17 @@ describe("transcript adapters", () => {
 
 describe("bounded model boundary", () => {
   test("extracts direct, fenced, and wrapped JSON output", () => {
-    const object = { mainline: "A", ask: { kind: "none", hint: "" }, ops: [] };
+    const object = {
+      mainline: "A",
+      ask: { kind: "none", hint: "" },
+      snapshot: { summary: "整段主题", progress: "最新进展", trail: ["旧路已证伪"] },
+      ops: [],
+    };
     expect(extractRollOutput(JSON.stringify(object))?.mainline).toBe("A");
     expect(extractRollOutput(`noise \`\`\`json\n${JSON.stringify(object)}\n\`\`\``)?.mainline).toBe("A");
-    expect(extractRollOutput(JSON.stringify({ result: JSON.stringify(object) }))?.mainline).toBe("A");
+    const wrapped = extractRollOutput(JSON.stringify({ result: JSON.stringify(object) }));
+    expect(wrapped?.mainline).toBe("A");
+    expect(wrapped?.snapshot).toEqual(object.snapshot);
     expect(extractRollOutput("no object")).toBeNull();
   });
 
@@ -160,5 +173,7 @@ describe("bounded model boundary", () => {
     expect(prompt).toContain("subtree truncated by runtime");
     expect(byteLength(prompt)).toBeLessThan(30_000);
     expect(prompt).toContain(ROLL_SENTINEL);
+    expect(prompt).toContain("revisable read projection");
+    expect(prompt).toContain("Never silently rewrite the path");
   });
 });

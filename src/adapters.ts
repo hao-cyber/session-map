@@ -2,6 +2,7 @@ import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { basename } from "node:path";
 import {
   GIANT_LINE_BYTES,
+  LEGACY_ROLL_SENTINELS,
   MAX_DELTA_BYTES,
   MAX_READ_BYTES,
   ROLL_SENTINEL,
@@ -72,11 +73,12 @@ function stringsFromContent(content: unknown, acceptedTypes: ReadonlySet<string>
 }
 
 function collectText(target: string[], text: string, collected: Collected, user = false): void {
-  if (text.includes(ROLL_SENTINEL)) collected.selfGenerated = true;
+  const sentinels = [ROLL_SENTINEL, ...LEGACY_ROLL_SENTINELS];
+  if (sentinels.some((sentinel) => text.includes(sentinel))) collected.selfGenerated = true;
   const filtered = stripInjectedPrefixes(text);
   if (!filtered) return;
   target.push(filtered);
-  if (user && filtered.includes(ROLL_SENTINEL)) collected.selfGenerated = true;
+  if (user && sentinels.some((sentinel) => filtered.includes(sentinel))) collected.selfGenerated = true;
 }
 
 function collectClaude(row: Record<string, unknown>, result: Collected): void {

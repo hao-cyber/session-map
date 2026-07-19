@@ -4,10 +4,14 @@
   const POLL_MS = 4_000;
   const SETTLE_MS = 300;
   const DRAG_THRESHOLD = 5;
+  if (new URLSearchParams(location.search).get("shell") === "mac") {
+    document.documentElement.dataset.shell = "mac";
+  }
   const API_HEADERS = {
-    "X-Maintrail-Token": window.MAINTRAIL_TOKEN,
+    "X-SessionMap-Token": window.SESSIONMAP_TOKEN,
   };
-  const manualFoldKey = "maintrail.manual-fold.v1";
+  const manualFoldKey = "sessionmap.manual-fold.v1";
+  const legacyManualFoldKey = "maintrail.manual-fold.v1";
 
   const svg = document.getElementById("mindmap");
   const loading = document.getElementById("loading");
@@ -29,7 +33,7 @@
   let mm;
   let snapshot;
   let seenRevision = -1;
-  let seenAssetVersion = String(window.MAINTRAIL_ASSET_VERSION || "");
+  let seenAssetVersion = String(window.SESSIONMAP_ASSET_VERSION || "");
   let polling = false;
   let firstRender = true;
   let settleTimer = 0;
@@ -44,7 +48,12 @@
 
   function loadManualFold() {
     try {
-      const value = JSON.parse(localStorage.getItem(manualFoldKey) || "{}");
+      let stored = localStorage.getItem(manualFoldKey);
+      if (!stored) {
+        stored = localStorage.getItem(legacyManualFoldKey);
+        if (stored) localStorage.setItem(manualFoldKey, stored);
+      }
+      const value = JSON.parse(stored || "{}");
       return value && typeof value === "object" && !Array.isArray(value) ? value : {};
     } catch {
       return {};
@@ -71,7 +80,7 @@
 
   async function api(path, init = {}) {
     const headers = new Headers(init.headers || {});
-    headers.set("X-Maintrail-Token", window.MAINTRAIL_TOKEN);
+    headers.set("X-SessionMap-Token", window.SESSIONMAP_TOKEN);
     if (init.body !== undefined) headers.set("Content-Type", "application/json");
     const response = await fetch(path, {
       cache: "no-store",
@@ -110,6 +119,7 @@
     }
     toastRegion.append(node);
     window.setTimeout(() => node.remove(), action ? 8_000 : 4_000);
+    return node;
   }
 
   function extractNodeId(data) {
@@ -194,7 +204,7 @@
       group.querySelector(`[data-node-id="${CSS.escape(anchor.id)}"]`),
     );
     // Markmap keys transitions by structural path. A sibling removal can leave
-    // an exiting DOM duplicate with the same stable Maintrail id for one frame.
+    // an exiting DOM duplicate with the same stable SessionMap id for one frame.
     const element = candidates.find((group) => group.__data__ === currentData) ?? candidates.at(-1);
     if (!element) return;
     const rect = element.getBoundingClientRect();
@@ -224,7 +234,7 @@
     if (!mm) {
       mm = window.markmap.Markmap.create(svg, {
         autoFit: false,
-        color: () => "#536a80",
+        color: () => "#aab2be",
         duration: 320,
         embedGlobalCSS: true,
         fitRatio: 0.9,
@@ -246,6 +256,10 @@
     await mm.setData(transformed.root);
     decorateInteractiveRows();
     if (firstRender) {
+      // setData resolves before Markmap's enter transition finishes. Fitting
+      // against that intermediate geometry can open on a clipped, overlapping
+      // tree — exactly when the user most needs a stable three-second view.
+      await afterLayout();
       await mm.fit(1.12);
       lastZoomK = window.d3.zoomTransform(svg).k;
       firstRender = false;
@@ -263,16 +277,23 @@
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
       }
+      const contextToggle = row.querySelector('[data-inline-action="toggle-context"]');
+      if (contextToggle) {
+        const data = dataById(row.dataset.nodeId);
+        contextToggle.setAttribute("aria-expanded", String(!Boolean(data?.payload?.fold)));
+      }
     }
   }
 
   function attachZoomListener() {
-    mm.zoom.on("zoom.maintrail", (event) => {
+    mm.zoom.on("zoom.sessionmap", (event) => {
       if (event?.sourceEvent) viewportInteraction = true;
       window.clearTimeout(settleTimer);
       settleTimer = window.setTimeout(applySemanticZoom, SETTLE_MS);
     });
   }
+
+  window.SESSIONMAP_FIT = () => mm?.fit(1.12);
 
   async function applySemanticZoom() {
     if (!mm?.state?.data) return;
@@ -399,6 +420,7 @@
         const option = document.createElement("option");
         option.value = engine.name;
         const reasons = {
+          checking: "检查中",
           "not-installed": "未安装",
           "not-authenticated": "未登录",
           "auth-check-failed": "状态检查失败",
@@ -449,11 +471,25 @@
       history.replaceState(null, "", `#session=${encodeURIComponent(sessionId)}`);
       queueMicrotask(() => { suppressHash = false; });
     }
+    const rows = [...svg.querySelectorAll(".fm-line[data-session-id]")]
+      .filter((row) => row.dataset.sessionId === sessionId);
+    for (const row of rows) {
+      row.classList.add("is-jumping");
+      row.setAttribute("aria-busy", "true");
+    }
+    const pending = toast("正在切回 session…");
     try {
       const result = await post("/api/jump", { sessionId });
+      pending.remove();
       toast(result.message || "已切回 session");
     } catch (error) {
+      pending.remove();
       toast(error.message || String(error));
+    } finally {
+      for (const row of rows) {
+        row.classList.remove("is-jumping");
+        row.removeAttribute("aria-busy");
+      }
     }
   }
 
@@ -480,8 +516,7 @@
     await poll(true);
   }
 
-  async function toggleRow(row) {
-    const id = row.dataset.nodeId;
+  async function toggleNodeById(id) {
     const node = id && dataById(id);
     if (!id || !node?.children?.length) return;
     const next = !Boolean(node.payload?.fold);
@@ -489,6 +524,15 @@
     saveManualFold();
     await mm.toggleNode(node);
     decorateInteractiveRows();
+  }
+
+  async function toggleRow(row) {
+    await toggleNodeById(row.dataset.nodeId);
+  }
+
+  function inlineContextToggle(event) {
+    const target = event.target;
+    return target instanceof Element ? target.closest('[data-inline-action="toggle-context"]') : null;
   }
 
   function rowFromEvent(event) {
@@ -515,6 +559,14 @@
       event.preventDefault();
       event.stopPropagation();
       pointerDragged = false;
+      return;
+    }
+    const contextToggle = inlineContextToggle(event);
+    if (contextToggle) {
+      event.preventDefault();
+      event.stopPropagation();
+      const sessionRow = contextToggle.closest(".fm-session");
+      if (sessionRow) await toggleNodeById(sessionRow.dataset.nodeId);
       return;
     }
     const row = rowFromEvent(event);
@@ -554,6 +606,13 @@
 
   svg.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    const contextToggle = inlineContextToggle(event);
+    if (contextToggle) {
+      event.preventDefault();
+      const sessionRow = contextToggle.closest(".fm-session");
+      if (sessionRow) await toggleNodeById(sessionRow.dataset.nodeId);
+      return;
+    }
     const row = rowFromEvent(event);
     if (!row) return;
     event.preventDefault();
@@ -653,8 +712,11 @@
         return;
       }
       if (force || next.revision !== seenRevision) {
-        await renderMap(next.markdown);
+        // The now bar is the first answer to the three-second recovery
+        // contract. Paint it as soon as the snapshot arrives; the map may
+        // still be finishing its layout transition.
         renderChrome(next);
+        await renderMap(next.markdown);
         snapshot = next;
         seenRevision = next.revision;
         seenAssetVersion = nextAsset;
@@ -672,12 +734,17 @@
   }
 
   function boot() {
+    if (!window.SESSIONMAP_TOKEN) {
+      statusLine.textContent = "请从 SessionMap.app 或 sessionmap open 打开";
+      loading.querySelector("span:last-child").textContent = "此页面没有本地访问凭据";
+      return;
+    }
     if (!window.d3 || !window.markmap?.Transformer || !window.markmap?.Markmap) {
       throw new Error("本地 markmap 资产未加载");
     }
     transformer = new window.markmap.Transformer();
-    window.MAINTRAIL_READY = true;
-    sessionStorage.removeItem("maintrail.asset-reload");
+    window.SESSIONMAP_READY = true;
+    sessionStorage.removeItem("sessionmap.asset-reload");
     poll(true);
     window.setInterval(() => poll(false), POLL_MS);
   }

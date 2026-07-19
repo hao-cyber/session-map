@@ -22,8 +22,8 @@ describe("offline browser bundle", () => {
   test("uses one semantic branch color instead of a rainbow palette", () => {
     const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
     const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
-    expect(app).toContain('color: () => "#536a80"');
-    expect(css).toContain("--branch: #536a80");
+    expect(app).toContain('color: () => "#aab2be"');
+    expect(css).toContain("--branch: #aab2be");
     expect(css).toContain(".markmap-link { stroke: var(--branch) !important;");
     // Regression: invisible markmap measurement boxes must not cover child rows.
     expect(css).toContain("#mindmap foreignObject { overflow: hidden; }");

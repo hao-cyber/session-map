@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRouter, resumeCommand, shellQuote, validSessionId } from "../src/actions.ts";
+import { ActionRouter, codexHomeForTranscript, resumeCommand, shellQuote, validSessionId } from "../src/actions.ts";
 import { AssetStore } from "../src/assets.ts";
 import { SessionMonitor } from "../src/monitor.ts";
 import { matchOrcaSession, stripSpinner, type OrcaSnapshot } from "../src/orca.ts";
 import { activeSessionCount, buildNowItems, renderMarkdown } from "../src/render.ts";
-import { MaintrailHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "../src/server.ts";
+import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "../src/server.ts";
 import { StateStore } from "../src/state.ts";
 import { TreeRuntime } from "../src/tree.ts";
 import { cleanup, sessionRecord, temporaryDirectory, transcriptMeta } from "./helpers.ts";
 
 const directories: string[] = [];
-const servers: MaintrailHttpServer[] = [];
+const servers: SessionMapHttpServer[] = [];
 function directory(): string {
   const value = temporaryDirectory();
   directories.push(value);
@@ -72,6 +72,69 @@ describe("safe rendering and attention ordering", () => {
     expect(items.map((item) => item.kind).slice(0, 2)).toEqual(["decision", "reply"]);
     expect(activeSessionCount(store.snapshot())).toBe(2);
   });
+
+  test("renders topic sessions as stable second-level navigation entries", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const first = transcriptMeta("topic-session-a", process.cwd());
+    first.title = "实现发布流程";
+    const second = transcriptMeta("topic-session-b", process.cwd());
+    second.title = "复核发布流程";
+    await runtime.applyRoll(first, {
+      mainline: "准备首发",
+      ask: { kind: "decision", hint: "选择格式" },
+      snapshot: {
+        summary: "构建签名发布包",
+        progress: "等待选择归档格式",
+        trail: ["pkg 需要额外证书，改用 app zip", "Developer ID 签名通过"],
+      },
+      ops: [{ op: "grow", parent: "mainline", type: "task", label: "验证签名" }],
+    });
+    await runtime.applyRoll(second, {
+      mainline: "准备首发",
+      ask: { kind: "none", hint: "" },
+      ops: [],
+    });
+
+    const markdown = renderMarkdown(store.snapshot());
+    const lines = markdown.split("\n");
+    const topic = lines.findIndex((line) => line.includes("data-kind=\"mainline\"") && line.includes("准备首发"));
+    const sessions = lines.filter((line) => line.startsWith("  - ") && line.includes("data-kind=\"session\""));
+    const summary = lines.findIndex((line) => line.includes("data-kind=\"thoughts\""));
+    const thought = lines.findIndex((line) => line.includes('data-kind="node"') && line.includes("验证签名"));
+    expect(topic).toBeGreaterThan(0);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0]).toContain("构建签名发布包");
+    expect(sessions[0]).toContain("等待选择归档格式");
+    expect(sessions[0]).toContain("脉络 2");
+    expect(sessions[1]).toContain("复核发布流程");
+    expect(lines.indexOf(sessions[0]!)).toBeGreaterThan(topic);
+    expect(lines.indexOf(sessions[1]!)).toBeLessThan(summary);
+    expect(lines[summary]).toContain('data-default-fold="true"');
+    expect(summary).toBeLessThan(thought);
+    expect(lines[thought]).toStartWith("    - ");
+    expect(lines.some((line) => line.startsWith("    - ") && line.includes("pkg 需要额外证书，改用 app zip"))).toBeTrue();
+  });
+
+  test("escapes every model-controlled rolling snapshot field", async () => {
+    const store = new StateStore(directory());
+    await new TreeRuntime(store).applyRoll(transcriptMeta("unsafe-snapshot", process.cwd()), {
+      mainline: "安全渲染",
+      ask: { kind: "none", hint: "" },
+      snapshot: {
+        summary: "[标题](javascript:alert(1))",
+        progress: "<img src=x onerror=alert(1)>",
+        trail: ["[脉络](javascript:alert(2))"],
+      },
+      ops: [],
+    });
+    const markdown = renderMarkdown(store.snapshot());
+    expect(markdown).not.toContain("[标题](javascript:");
+    expect(markdown).not.toContain("[脉络](javascript:");
+    expect(markdown).not.toContain("<img src=x");
+    expect(markdown).toContain("&#91;标题&#93;");
+    expect(markdown).toContain("&lt;img src=x onerror=alert&#40;1&#41;&gt;");
+  });
 });
 
 describe("action safety and Orca matching", () => {
@@ -83,6 +146,18 @@ describe("action safety and Orca matching", () => {
     const session = sessionRecord("safe-id", cwd);
     expect(resumeCommand(session)).toBe(`cd ${shellQuote(cwd)} && claude --resume 'safe-id'`);
     expect(() => resumeCommand({ ...session, id: "bad;id" })).toThrow("invalid session id");
+
+    const codexHome = "/Users/example/Library/Application Support/orca/codex-runtime-home/home";
+    const codex = {
+      ...session,
+      provider: "codex" as const,
+      path: `${codexHome}/sessions/2026/07/19/rollout-safe-id.jsonl`,
+    };
+    expect(codexHomeForTranscript(codex.path)).toBe(codexHome);
+    expect(resumeCommand(codex)).toBe(
+      `cd ${shellQuote(cwd)} && env CODEX_HOME=${shellQuote(codexHome)} codex resume -c check_for_update_on_startup=false 'safe-id'`,
+    );
+    expect(codexHomeForTranscript("relative/sessions/2026/rollout.jsonl")).toBeNull();
   });
 
   test("matches Orca by exact prompt then paneKey to terminal handle", () => {
@@ -95,6 +170,100 @@ describe("action safety and Orca matching", () => {
     };
     expect(matchOrcaSession(session, snapshot).terminal?.handle).toBe("terminal-handle");
     expect(stripSpinner("⠋  Useful title")).toBe("Useful title");
+
+    const remembered = { ...session, terminalHandle: "remembered" };
+    const rememberedTerminal = { ...snapshot.terminals[0]!, handle: "remembered", paneKey: "other:pane" };
+    expect(matchOrcaSession(remembered, {
+      available: true,
+      agents: [],
+      terminals: [snapshot.terminals[0]!, rememberedTerminal],
+    }).terminal?.handle).toBe("remembered");
+  });
+
+  test("remembers a created Orca handle so the next click switches instead of duplicating", async () => {
+    const store = new StateStore(directory());
+    const session = { ...sessionRecord("orca-session", process.cwd()), provider: "codex" as const };
+    await store.update((state) => { state.sessions[session.id] = session; });
+    let snapshotCalls = 0;
+    const commands: string[][] = [];
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => {
+        snapshotCalls += 1;
+        return snapshotCalls === 1
+          ? { available: true, agents: [], terminals: [] }
+          : {
+              available: true,
+              agents: [],
+              terminals: [{
+                handle: "created-handle",
+                paneKey: "tab:leaf",
+                title: "restored",
+                connected: true,
+                writable: true,
+                worktreePath: session.cwd,
+              }],
+            };
+      },
+      runOrcaJson: async (command) => {
+        commands.push(command);
+        if (command[0] === "terminal" && command[1] === "create") {
+          return { terminal: { handle: "created-handle", paneKey: "tab:leaf" } };
+        }
+        return {};
+      },
+    });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "orca-resume" });
+    expect(store.snapshot().sessions[session.id]?.terminalHandle).toBe("created-handle");
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "orca-switch" });
+    expect(commands.filter((command) => command[1] === "create")).toHaveLength(1);
+    expect(commands.filter((command) => command[1] === "switch")).toHaveLength(1);
+  });
+
+  test("focuses a live session by exact transcript process and TTY without Orca", async () => {
+    const store = new StateStore(directory());
+    const session = sessionRecord("live-session", process.cwd());
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const scripts: Array<{ script: string; args: string[] }> = [];
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => ({ available: false, agents: [], terminals: [] }),
+      readTranscriptProcesses: async () => [{
+        sessionId: session.id,
+        pid: 4242,
+        tty: "/dev/ttys007",
+        command: "open transcript",
+      }],
+      readProcesses: async () => [],
+      runText: async () => ({ ok: true, text: "ttys007\n" }),
+      runAppleScript: async (script, args) => {
+        scripts.push({ script, args });
+        return true;
+      },
+    });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-focus" });
+    expect(scripts).toHaveLength(1);
+    expect(scripts[0]?.args).toEqual(["/dev/ttys007"]);
+    expect(scripts[0]?.script).toContain("targetTTY");
+  });
+
+  test("resumes a closed session in Terminal and degrades send to manual without Orca", async () => {
+    const store = new StateStore(directory());
+    const session = sessionRecord("closed-session", process.cwd());
+    await store.update((state) => { state.sessions[session.id] = session; });
+    const commands: string[] = [];
+    const actions = new ActionRouter(store, {
+      readOrcaSnapshot: async () => ({ available: false, agents: [], terminals: [] }),
+      readTranscriptProcesses: async () => [],
+      readProcesses: async () => [],
+      runAppleScript: async (script, args) => {
+        if (script.includes("shellCommand")) commands.push(args[0] ?? "");
+        return true;
+      },
+    });
+    expect(await actions.jump(session.id)).toMatchObject({ ok: true, mode: "native-resume" });
+    expect(commands[0]).toContain("claude --resume 'closed-session'");
+    const sent = await actions.say(session.id, "继续检查");
+    expect(sent).toMatchObject({ ok: false, mode: "manual" });
+    expect(sent.message).toContain("手动输入");
   });
 });
 
@@ -121,25 +290,36 @@ describe("local HTTP security boundary", () => {
   test("requires the capability token on every API read", async () => {
     const { server, token } = await runningServer();
     expect((await fetch(`${server.url}/api/snapshot`)).status).toBe(401);
-    const response = await fetch(`${server.url}/api/snapshot`, { headers: { "X-Maintrail-Token": token } });
+    const response = await fetch(`${server.url}/api/snapshot`, { headers: { "X-SessionMap-Token": token } });
     expect(response.status).toBe(200);
-    expect((await response.json()).markdown).toContain("Maintrail");
+    expect((await response.json()).markdown).toContain("SessionMap");
   });
 
-  test("injects the token with a nonce and serves only enumerated local assets", async () => {
+  test("exposes only a minimal unauthenticated loopback health check", async () => {
+    const { server } = await runningServer();
+    const response = await fetch(`${server.url}/health`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, name: "SessionMap" });
+  });
+
+  test("keeps the token out of the public root and bootstraps it only in a URL fragment", async () => {
     const { server, token } = await runningServer();
     const root = await fetch(server.url);
     const html = await root.text();
-    expect(html).toContain(`window.MAINTRAIL_TOKEN = "${token}"`);
-    expect(html).not.toContain("__MAINTRAIL_NONCE__");
+    expect(html).not.toContain(token);
+    expect(html).toContain("sessionmap.capability.v1");
+    expect(html).not.toContain("__SESSIONMAP_NONCE__");
     expect(root.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+    const browserUrl = new URL(server.browserUrl());
+    expect(browserUrl.hash).toBe(`#cap=${token}`);
+    expect(browserUrl.search).toBe("");
     expect((await fetch(`${server.url}/assets/app.js`)).status).toBe(200);
     expect((await fetch(`${server.url}/assets/unknown.js`)).status).toBe(404);
   });
 
   test("rejects evil origins, wrong media types, and non-object JSON", async () => {
     const { server, token } = await runningServer();
-    const headers = { "X-Maintrail-Token": token };
+    const headers = { "X-SessionMap-Token": token };
     const evil = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { ...headers, Origin: "http://evil.example", "Content-Type": "application/json" }, body: "{}" });
     expect(evil.status).toBe(403);
     const wrongType = await fetch(`${server.url}/api/archive`, { method: "POST", headers: { ...headers, Origin: server.url, "Content-Type": "text/plain" }, body: "{}" });
@@ -150,7 +330,7 @@ describe("local HTTP security boundary", () => {
 
   test("archives and restores through an authorized click-equivalent POST", async () => {
     const fixture = await runningServer(true);
-    const headers = { "X-Maintrail-Token": fixture.token, Origin: fixture.server.url, "Content-Type": "application/json" };
+    const headers = { "X-SessionMap-Token": fixture.token, Origin: fixture.server.url, "Content-Type": "application/json" };
     const archived = await fetch(`${fixture.server.url}/api/archive`, { method: "POST", headers, body: JSON.stringify({ rootId: fixture.rootId }) });
     expect(archived.status).toBe(200);
     expect(fixture.store.snapshot().archived).toContain(fixture.rootId);
@@ -161,7 +341,7 @@ describe("local HTTP security boundary", () => {
 });
 
 async function runningServer(withMainline = false): Promise<{
-  server: MaintrailHttpServer;
+  server: SessionMapHttpServer;
   token: string;
   store: StateStore;
   rootId: string;
@@ -174,7 +354,7 @@ async function runningServer(withMainline = false): Promise<{
     rootId = (await runtime.applyRoll(transcriptMeta("api-session", root), { mainline: "API work", ask: { kind: "none", hint: "" }, ops: [] })).rootId;
   }
   const monitor = new SessionMonitor(store);
-  const server = new MaintrailHttpServer({
+  const server = new SessionMapHttpServer({
     store,
     runtime,
     actions: new ActionRouter(store),

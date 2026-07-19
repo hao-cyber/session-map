@@ -31,6 +31,13 @@ export interface SessionAsk {
   hint: string;
 }
 
+export interface SessionSnapshot {
+  summary: string;
+  progress: string;
+  trail: string[];
+  at: string;
+}
+
 export interface SessionRecord {
   id: string;
   provider: Provider;
@@ -42,6 +49,7 @@ export interface SessionRecord {
   rootId: string | null;
   cursor: string | null;
   ask: SessionAsk;
+  snapshot: SessionSnapshot;
   status: SessionStatus;
   terminalOpen: boolean;
   terminalHandle?: string;
@@ -98,6 +106,7 @@ export type RollOp = GrowOp | CloseOp | BlockOp | UnblockOp | RenameOp | Refocus
 export interface RollOutput {
   mainline: string;
   ask: SessionAsk;
+  snapshot?: unknown;
   ops: unknown[];
 }
 
@@ -134,7 +143,7 @@ export interface EngineAvailability {
   name: EngineName;
   available: boolean;
   path: string | null;
-  reason?: "not-installed" | "not-authenticated" | "auth-check-failed" | "recent-failure";
+  reason?: "checking" | "not-installed" | "not-authenticated" | "auth-check-failed" | "recent-failure";
 }
 
 export interface GitChip {

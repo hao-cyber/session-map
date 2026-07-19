@@ -1,14 +1,25 @@
 import { existsSync } from "node:fs";
 import { matchOrcaSession, orcaPath, readOrcaSnapshot, runOrcaJson } from "./orca.ts";
-import { processForSession, readProcesses, runText } from "./monitor.ts";
+import { processForSession, readProcesses, readTranscriptProcesses, runText } from "./monitor.ts";
 import { StateStore } from "./state.ts";
 import type { SessionRecord } from "./types.ts";
-import { controlSafe, truncateChars } from "./utils.ts";
+import { controlSafe, isRecord, truncateChars } from "./utils.ts";
 
 export interface ActionResult {
   ok: boolean;
   mode: "orca-switch" | "orca-resume" | "native-focus" | "native-resume" | "manual" | "error";
   message: string;
+}
+
+type TextResult = { ok: boolean; text: string };
+
+export interface ActionDependencies {
+  readOrcaSnapshot: typeof readOrcaSnapshot;
+  runOrcaJson: typeof runOrcaJson;
+  readProcesses: typeof readProcesses;
+  readTranscriptProcesses: typeof readTranscriptProcesses;
+  runText: (command: string[], timeoutMs?: number) => Promise<TextResult>;
+  runAppleScript: (script: string, args: string[]) => Promise<boolean>;
 }
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
@@ -21,16 +32,29 @@ export function shellQuote(value: string): string {
   return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
+export function codexHomeForTranscript(path: string): string | null {
+  const safePath = controlSafe(path);
+  const marker = "/sessions/";
+  const index = safePath.lastIndexOf(marker);
+  if (!safePath.startsWith("/") || index <= 0) return null;
+  return safePath.slice(0, index);
+}
+
 export function resumeCommand(session: SessionRecord): string {
   if (!validSessionId(session.id)) throw new Error("invalid session id");
   const cwd = controlSafe(session.cwd);
   if (!cwd || !existsSync(cwd)) throw new Error("session cwd no longer exists");
-  const executable = session.provider === "claude" ? "claude --resume" : "codex resume";
+  const codexHome = session.provider === "codex" ? codexHomeForTranscript(session.path) : null;
+  const executable = session.provider === "claude"
+    ? "claude --resume"
+    : codexHome
+      ? `env CODEX_HOME=${shellQuote(codexHome)} codex resume -c check_for_update_on_startup=false`
+      : "codex resume -c check_for_update_on_startup=false";
   return `cd ${shellQuote(cwd)} && ${executable} ${shellQuote(session.id)}`;
 }
 
-async function ttyForPid(pid: number): Promise<string | null> {
-  const result = await runText(["/bin/ps", "-o", "tty=", "-p", String(pid)]);
+async function ttyForPid(pid: number, textRunner: ActionDependencies["runText"]): Promise<string | null> {
+  const result = await textRunner(["/bin/ps", "-o", "tty=", "-p", String(pid)]);
   if (!result.ok) return null;
   const tty = controlSafe(result.text);
   if (!tty || tty === "??") return null;
@@ -93,7 +117,19 @@ async function runAppleScript(script: string, args: string[]): Promise<boolean> 
 }
 
 export class ActionRouter {
-  constructor(readonly store: StateStore) {}
+  readonly dependencies: ActionDependencies;
+
+  constructor(readonly store: StateStore, dependencies: Partial<ActionDependencies> = {}) {
+    this.dependencies = {
+      readOrcaSnapshot,
+      runOrcaJson,
+      readProcesses,
+      readTranscriptProcesses,
+      runText,
+      runAppleScript,
+      ...dependencies,
+    };
+  }
 
   session(id: string): SessionRecord {
     if (!validSessionId(id)) throw new Error("invalid session id");
@@ -105,16 +141,16 @@ export class ActionRouter {
   async jump(id: string): Promise<ActionResult> {
     try {
       const session = this.session(id);
-      const orca = await readOrcaSnapshot();
+      const orca = await this.dependencies.readOrcaSnapshot();
       if (orca.available) {
         const match = matchOrcaSession(session, orca);
         if (match.terminal?.connected) {
-          await runOrcaJson(["terminal", "switch", "--terminal", match.terminal.handle]);
+          await this.dependencies.runOrcaJson(["terminal", "switch", "--terminal", match.terminal.handle]);
           return { ok: true, mode: "orca-switch", message: "已切换到 Orca 终端" };
         }
         try {
           const command = resumeCommand(session);
-          await runOrcaJson([
+          const created = await this.dependencies.runOrcaJson([
             "terminal",
             "create",
             "--worktree",
@@ -125,6 +161,18 @@ export class ActionRouter {
             command,
             "--focus",
           ]);
+          const terminal = isRecord(created) && isRecord(created.terminal) ? created.terminal : null;
+          const handle = terminal && typeof terminal.handle === "string" ? terminal.handle : "";
+          const paneKey = terminal && typeof terminal.paneKey === "string" ? terminal.paneKey : "";
+          if (handle) {
+            await this.store.update((state) => {
+              const current = state.sessions[id];
+              if (!current) return;
+              current.terminalHandle = handle;
+              if (paneKey) current.paneKey = paneKey;
+              current.terminalOpen = true;
+            });
+          }
           return { ok: true, mode: "orca-resume", message: "已在 Orca 中复活 session" };
         } catch {
           // The cwd may not be registered in Orca. Native fallback preserves the affordance.
@@ -133,17 +181,19 @@ export class ActionRouter {
 
       let pid = session.pid;
       if (!pid) {
-        const process = processForSession(session, await readProcesses());
+        const transcriptProcess = (await this.dependencies.readTranscriptProcesses())
+          .find((candidate) => candidate.sessionId === session.id);
+        const process = transcriptProcess ?? processForSession(session, await this.dependencies.readProcesses());
         pid = process?.pid;
       }
       if (pid) {
-        const tty = await ttyForPid(pid);
-        if (tty && await runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
+        const tty = await ttyForPid(pid, this.dependencies.runText);
+        if (tty && await this.dependencies.runAppleScript(FOCUS_TTY_SCRIPT, [tty])) {
           return { ok: true, mode: "native-focus", message: "已聚焦系统终端" };
         }
       }
       const command = resumeCommand(session);
-      if (await runAppleScript(RESUME_SCRIPT, [controlSafe(command)])) {
+      if (await this.dependencies.runAppleScript(RESUME_SCRIPT, [controlSafe(command)])) {
         return { ok: true, mode: "native-resume", message: "已在系统终端复活 session" };
       }
       return { ok: false, mode: "error", message: "无法聚焦或复活该 session" };
@@ -159,11 +209,11 @@ export class ActionRouter {
     }
     try {
       const session = this.session(id);
-      const orca = await readOrcaSnapshot();
+      const orca = await this.dependencies.readOrcaSnapshot();
       if (orca.available) {
         const match = matchOrcaSession(session, orca);
         if (match.terminal?.connected && match.terminal.writable) {
-          await runOrcaJson([
+          await this.dependencies.runOrcaJson([
             "terminal",
             "send",
             "--terminal",

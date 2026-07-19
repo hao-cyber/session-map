@@ -1,5 +1,5 @@
-export const APP_NAME = "maintrail";
-export const SCHEMA_VERSION = 1;
+export const APP_NAME = "sessionmap";
+export const SCHEMA_VERSION = 2;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4317;
 
@@ -20,8 +20,13 @@ export const MAX_SUBTREE_LINES = 120;
 export const MAINLINE_NAME_CHARS = 48;
 export const NODE_LABEL_CHARS = 20;
 export const NOTE_CHARS = 160;
+export const SESSION_SUMMARY_CHARS = 36;
+export const SESSION_PROGRESS_CHARS = 56;
+export const SESSION_TRAIL_ITEM_CHARS = 48;
+export const SESSION_TRAIL_ITEMS = 6;
 export const ROLL_TIMEOUT_MS = 180_000;
-export const ROLL_SENTINEL = "MAINTRAIL_ROLL_V1_DO_NOT_INGEST";
+export const ROLL_SENTINEL = "SESSIONMAP_ROLL_V1_DO_NOT_INGEST";
+export const LEGACY_ROLL_SENTINELS = ["MAINTRAIL_ROLL_V1_DO_NOT_INGEST"] as const;
 
 export const NODE_TYPES = [
   "goal",

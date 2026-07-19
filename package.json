@@ -1,14 +1,14 @@
 {
-  "name": "maintrail",
+  "name": "sessionmap",
   "version": "0.1.0",
   "license": "MIT",
   "author": "Hao",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hao-cyber/maintrail.git"
+    "url": "git+https://github.com/hao-cyber/sessionmap.git"
   },
-  "homepage": "https://github.com/hao-cyber/maintrail#readme",
-  "bugs": "https://github.com/hao-cyber/maintrail/issues",
+  "homepage": "https://github.com/hao-cyber/sessionmap#readme",
+  "bugs": "https://github.com/hao-cyber/sessionmap/issues",
   "keywords": [
     "ai-agents",
     "claude-code",
@@ -20,7 +20,7 @@
   "type": "module",
   "description": "A persistent external thinking tree for parallel AI coding sessions",
   "bin": {
-    "maintrail": "src/cli.ts"
+    "sessionmap": "src/cli.ts"
   },
   "files": [
     "src",
@@ -30,15 +30,17 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "MAINTRAIL_DEV=1 bun --watch src/cli.ts serve",
+    "dev": "SESSIONMAP_DEV=1 bun --watch src/cli.ts serve",
     "start": "bun src/cli.ts serve",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check:web": "bun run scripts/check-web.ts",
+    "check:native": "swift build --package-path native -c debug",
     "build": "bun run scripts/build.ts",
+    "build:app": "bun run scripts/build-macos-app.ts",
     "release:mac": "bun run scripts/release-macos.ts",
     "prepublishOnly": "bun run check",
-    "check": "bun run typecheck && bun run check:web && bun test && bun run build"
+    "check": "bun run typecheck && bun run check:web && bun test && bun run build && bun run check:native"
   },
   "devDependencies": {
     "@types/bun": "^1.3.13",

@@ -3,17 +3,28 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="color-scheme" content="dark" />
-    <meta name="theme-color" content="#091017" />
-    <title>Maintrail — agent thinking map</title>
+    <meta name="color-scheme" content="light" />
+    <meta name="theme-color" content="#f7f7f8" />
+    <title>SessionMap — agent thinking map</title>
     <link rel="stylesheet" href="/assets/styles.css" />
-    <script nonce="__MAINTRAIL_NONCE__">
-      window.MAINTRAIL_TOKEN = "__MAINTRAIL_TOKEN__";
-      window.MAINTRAIL_ASSET_VERSION = "__MAINTRAIL_ASSET_VERSION__";
+    <script nonce="__SESSIONMAP_NONCE__">
+      (() => {
+        const key = "sessionmap.capability.v1";
+        const fragment = new URLSearchParams(location.hash.slice(1));
+        const supplied = fragment.get("cap");
+        if (supplied && /^[A-Za-z0-9_-]{43,128}$/.test(supplied)) {
+          sessionStorage.setItem(key, supplied);
+          fragment.delete("cap");
+          const rest = fragment.toString();
+          history.replaceState(null, "", `${location.pathname}${location.search}${rest ? `#${rest}` : ""}`);
+        }
+        window.SESSIONMAP_TOKEN = sessionStorage.getItem(key) || "";
+      })();
+      window.SESSIONMAP_ASSET_VERSION = "__SESSIONMAP_ASSET_VERSION__";
       window.addEventListener("load", () => {
         setTimeout(() => {
-          if (window.MAINTRAIL_READY) return;
-          const key = "maintrail.asset-reload";
+          if (window.SESSIONMAP_READY) return;
+          const key = "sessionmap.asset-reload";
           if (!sessionStorage.getItem(key)) {
             sessionStorage.setItem(key, "1");
             location.reload();
@@ -27,11 +38,11 @@
     <script defer src="/assets/app.js"></script>
   </head>
   <body>
-    <header class="topbar" aria-label="Maintrail 状态栏">
+    <header class="topbar" aria-label="SessionMap 状态栏">
       <div class="brand-block">
         <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
         <div>
-          <strong>Maintrail</strong>
+          <strong>SessionMap</strong>
           <span id="status-line">正在读取工作线…</span>
         </div>
       </div>
@@ -51,7 +62,7 @@
     <section id="now-bar" class="now-bar" aria-label="现在该看哪"></section>
 
     <main id="map-shell">
-      <svg id="mindmap" role="tree" aria-label="Maintrail 思维树"></svg>
+      <svg id="mindmap" role="tree" aria-label="SessionMap 思维树"></svg>
       <div id="loading" class="loading-state">
         <span class="busy-dot"></span>
         <span>重建思维路径</span>
@@ -86,6 +97,6 @@
     </div>
 
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
-    <noscript>Maintrail 需要 JavaScript 来渲染本地思维树。</noscript>
+    <noscript>SessionMap 需要 JavaScript 来渲染本地思维树。</noscript>
   </body>
 </html>

@@ -166,7 +166,7 @@ describe("watcher delivery semantics", () => {
     const root = temporaryDirectory();
     directories.push(root);
     const path = join(root, "self.jsonl");
-    writeJsonLines(path, [{ type: "user", sessionId: "self", message: { role: "user", content: "MAINTRAIL_ROLL_V1_DO_NOT_INGEST" } }]);
+    writeJsonLines(path, [{ type: "user", sessionId: "self", message: { role: "user", content: "SESSIONMAP_ROLL_V1_DO_NOT_INGEST" } }]);
     const source = (): TranscriptFile[] => [{ path, provider: "claude", size: statSync(path).size, mtimeMs: statSync(path).mtimeMs }];
     const store = new StateStore(join(root, "state"));
     const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async () => {

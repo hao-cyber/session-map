@@ -33,12 +33,22 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
   const audioRoot = await apply(runtime, audio, {
     mainline: "修复手表录音断续",
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "定位手表录音断续根因",
+      progress: "正在验证蓝牙音量是否影响录音",
+      trail: ["目标：稳定手表端录音", "先验证蓝牙音量假设"],
+    },
     ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "验证蓝牙音量假设" }],
   });
   let audioCursor = store.snapshot().sessions[audio.sessionId]!.cursor!;
   await apply(runtime, audio, {
     mainline: "修复手表录音断续",
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "定位手表录音断续根因",
+      progress: "音量假设已证伪，转查系统路由",
+      trail: ["关闭蓝牙后仍然断续", "因此否定音量根因", "新方向：追踪音频路由切换"],
+    },
     ops: [
       { op: "close", node: audioCursor, state: "dead", note: "关闭蓝牙后仍可复现" },
       { op: "grow", parent: "mainline", type: "finding", label: "音量假设已证伪" },
@@ -49,6 +59,11 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
   await apply(runtime, audio, {
     mainline: "修复手表录音断续",
     ask: { kind: "review", hint: "审阅路由日志" },
+    snapshot: {
+      summary: "定位手表录音断续根因",
+      progress: "已抓取真机路由日志，等待审阅",
+      trail: ["蓝牙音量不是根因", "当前聚焦系统音频路由", "下一步由你审阅真机日志"],
+    },
     ops: [{ op: "block", node: audioCursor, note: "等你审阅真机路由日志" }],
   });
 
@@ -62,6 +77,11 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
   await apply(runtime, audioPeer, {
     mainline: "修复手表录音断续",
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "复核录音缓冲策略",
+      progress: "正在验证 ring buffer 是否放大断续",
+      trail: ["同属录音断续主题", "独立复核缓冲区抖动"],
+    },
     ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "复核缓冲区抖动" }],
   });
 
@@ -69,12 +89,17 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
     "demo-claude-release",
     "claude",
     cwd,
-    "准备 Maintrail 首发",
+    "准备 SessionMap 首发",
     "需要决定首发是签名 zip 还是 pkg",
   );
   const releaseRoot = await apply(runtime, release, {
-    mainline: "准备 Maintrail 首发",
+    mainline: "准备 SessionMap 首发",
     ask: { kind: "decision", hint: "选择首发包格式" },
+    snapshot: {
+      summary: "完成 SessionMap macOS 首发",
+      progress: "签名链可用，待决定首发包格式",
+      trail: ["目标：Homebrew 安装", "已验证 Developer ID", "当前需选择 app zip 或 pkg"],
+    },
     ops: [
       { op: "grow", parent: "mainline", type: "decision", label: "选择首发包格式" },
       { op: "grow", parent: "mainline", type: "task", label: "验证公证凭据链" },
@@ -91,6 +116,11 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
   const zoomRoot = await apply(runtime, zoom, {
     mainline: "实现语义缩放",
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "实现可恢复空间记忆的语义缩放",
+      progress: "正在校准全景、中景与近景阈值",
+      trail: ["全景只保留主题", "中景显示 session 目录", "近景展开思考脉络"],
+    },
     ops: [
       { op: "grow", parent: "mainline", type: "task", label: "校准三级缩放阈值" },
       { op: "grow", parent: "mainline", type: "finding", label: "中心节点需空间补偿" },
@@ -107,6 +137,11 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
   const adapterRoot = await apply(runtime, adapter, {
     mainline: "加固 transcript 过滤",
     ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "把 transcript 压成高信号增量",
+      progress: "巨行与异常 JSON 已覆盖",
+      trail: ["工具结果正文噪声过高", "用户原文是最强转折信号", "增量硬限制为十二 KB"],
+    },
     ops: [
       { op: "grow", parent: "mainline", type: "task", label: "过滤系统注入文本" },
       { op: "grow", parent: "mainline", type: "attempt", label: "整段保留工具结果" },

@@ -3,6 +3,13 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { join } from "node:path";
 import { InstanceLock, StateStore, createEmptyState, repairState } from "../src/state.ts";
 import { TreeRuntime } from "../src/tree.ts";
+import {
+  SCHEMA_VERSION,
+  SESSION_PROGRESS_CHARS,
+  SESSION_SUMMARY_CHARS,
+  SESSION_TRAIL_ITEM_CHARS,
+  SESSION_TRAIL_ITEMS,
+} from "../src/constants.ts";
 import { cleanup, temporaryDirectory, transcriptMeta } from "./helpers.ts";
 
 const directories: string[] = [];
@@ -48,13 +55,38 @@ describe("durable state", () => {
     raw.roots = ["a"];
     raw.sessions.s = {
       id: "s", provider: "claude", path: "p", cwd: "", title: "t", lastUser: "", mainline: "A", rootId: "a", cursor: "missing",
-      ask: { kind: "none", hint: "" }, status: "unknown", terminalOpen: false, lastTranscriptAt: at, lastStatusAt: at, updatedAt: at,
+      ask: { kind: "none", hint: "" }, snapshot: { summary: "测试会话", progress: "检查修复", trail: [], at },
+      status: "unknown", terminalOpen: false, lastTranscriptAt: at, lastStatusAt: at, updatedAt: at,
     };
     const result = repairState(raw);
     expect(result.repaired).toBeTrue();
     expect(result.state.nodes.a?.children).toEqual(["b"]);
     expect(result.state.nodes.b?.children).toEqual([]);
     expect(result.state.sessions.s?.cursor).toBe("a");
+  });
+
+  test("migrates old sessions into bounded revisable snapshots", () => {
+    const at = new Date().toISOString();
+    const raw = createEmptyState();
+    raw.schemaVersion = 1;
+    raw.sessions.legacy = {
+      id: "legacy", provider: "claude", path: "p", cwd: "", title: "旧版完整会话标题", lastUser: "", mainline: null, rootId: null, cursor: null,
+      ask: { kind: "none", hint: "" },
+      // Deliberately remove the v2 projection to simulate an on-disk v1 record.
+      snapshot: undefined,
+      summary: "旧版摘要",
+      progress: "旧版进展",
+      status: "unknown", terminalOpen: false, lastTranscriptAt: at, lastStatusAt: at, updatedAt: at,
+    } as never;
+    const result = repairState(raw, at);
+    expect(result.repaired).toBeTrue();
+    expect(result.state.schemaVersion).toBe(SCHEMA_VERSION);
+    expect(result.state.sessions.legacy?.snapshot).toEqual({
+      summary: "旧版摘要",
+      progress: "旧版进展",
+      trail: [],
+      at,
+    });
   });
 
   test("preserves colliding root objects under distinct canonical names", () => {
@@ -89,11 +121,11 @@ describe("tree write boundary", () => {
     const store = new StateStore(directory());
     const runtime = new TreeRuntime(store);
     const result = await runtime.applyRoll(transcriptMeta("s1", process.cwd()), {
-      mainline: "  Release   Maintrail ", ask: { kind: "none", hint: "" },
+      mainline: "  Release   SessionMap ", ask: { kind: "none", hint: "" },
       ops: [{ op: "grow", parent: "mainline", type: "task", label: "完成原子状态写入" }],
     });
     const state = store.snapshot();
-    expect(result.mainline).toBe("Release Maintrail");
+    expect(result.mainline).toBe("Release SessionMap");
     expect(result.accepted).toBe(1);
     expect(state.nodes[result.rootId]?.children).toHaveLength(1);
     expect(state.sessions.s1?.cursor).toBe(state.nodes[result.rootId]?.children[0]);
@@ -168,5 +200,93 @@ describe("tree write boundary", () => {
     expect(store.snapshot().nodes[line.rootId]).toBeDefined();
     await runtime.restore(line.rootId);
     expect(store.snapshot().archived).not.toContain(line.rootId);
+  });
+
+  test("revises the reading snapshot while preserving the superseded path", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("revision", process.cwd());
+    const first = await runtime.applyRoll(meta, {
+      mainline: "修复音频路由",
+      ask: { kind: "none", hint: "" },
+      snapshot: {
+        summary: "修复蓝牙静音",
+        progress: "怀疑系统音量被重置",
+        trail: ["静音只在重连后出现", "准备验证音量写入"],
+      },
+      ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "验证音量重置假设" }],
+    });
+    const oldPath = store.snapshot().sessions.revision!.cursor!;
+
+    await runtime.applyRoll(meta, {
+      mainline: "修复音频路由",
+      ask: { kind: "review", hint: "审阅路由修复" },
+      snapshot: {
+        summary: "修复蓝牙路由恢复",
+        progress: "音量假设已证伪，改查设备路由",
+        trail: ["重连触发静音", "音量写入正常，旧假设被证伪", "当前验证设备路由恢复"],
+      },
+      ops: [
+        { op: "close", node: oldPath, state: "dead", note: "日志证明音量写入正常" },
+        { op: "grow", parent: "mainline", type: "attempt", label: "验证设备路由恢复" },
+      ],
+    });
+
+    const state = store.snapshot();
+    expect(state.sessions.revision?.snapshot.summary).toBe("修复蓝牙路由恢复");
+    expect(state.sessions.revision?.snapshot.progress).toBe("音量假设已证伪，改查设备路由");
+    expect(state.nodes[oldPath]?.state).toBe("dead");
+    expect(state.nodes[oldPath]?.note).toBe("日志证明音量写入正常");
+    expect(state.nodes[first.rootId]?.children).toHaveLength(2);
+  });
+
+  test("bounds every rolling snapshot field at the runtime boundary", async () => {
+    const store = new StateStore(directory());
+    await new TreeRuntime(store).applyRoll(transcriptMeta("bounded", process.cwd()), {
+      mainline: "快照边界",
+      ask: { kind: "none", hint: "" },
+      snapshot: {
+        summary: "主".repeat(SESSION_SUMMARY_CHARS + 10),
+        progress: "进".repeat(SESSION_PROGRESS_CHARS + 10),
+        trail: Array.from({ length: SESSION_TRAIL_ITEMS + 3 }, (_, index) => `${index}${"路".repeat(SESSION_TRAIL_ITEM_CHARS + 10)}`),
+      },
+      ops: [],
+    });
+    const snapshot = store.snapshot().sessions.bounded!.snapshot;
+    expect(Array.from(snapshot.summary)).toHaveLength(SESSION_SUMMARY_CHARS);
+    expect(Array.from(snapshot.progress)).toHaveLength(SESSION_PROGRESS_CHARS);
+    expect(snapshot.trail).toHaveLength(SESSION_TRAIL_ITEMS);
+    expect(snapshot.trail.every((item) => Array.from(item).length <= SESSION_TRAIL_ITEM_CHARS)).toBeTrue();
+  });
+
+  test("preserves closed outcomes and represents later reconsideration as a new path", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("reconsider", process.cwd());
+    const line = await runtime.applyRoll(meta, {
+      mainline: "选择存储方案",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "grow", parent: "mainline", type: "attempt", label: "尝试事件数据库" }],
+    });
+    const old = store.snapshot().sessions.reconsider!.cursor!;
+    await runtime.applyRoll(meta, {
+      mainline: "选择存储方案",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "close", node: old, state: "dead", note: "首版维护成本过高" }],
+    });
+    const revised = await runtime.applyRoll(meta, {
+      mainline: "选择存储方案",
+      ask: { kind: "none", hint: "" },
+      ops: [
+        { op: "unblock", node: old },
+        { op: "grow", parent: "mainline", type: "attempt", label: "规模扩大后重评事件库" },
+      ],
+    });
+    const state = store.snapshot();
+    expect(revised.accepted).toBe(1);
+    expect(revised.rejected[0]).toContain("waiting");
+    expect(state.nodes[old]?.state).toBe("dead");
+    expect(state.nodes[old]?.note).toBe("首版维护成本过高");
+    expect(state.nodes[line.rootId]?.children).toHaveLength(2);
   });
 });

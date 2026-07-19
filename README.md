@@ -1,46 +1,70 @@
-# Maintrail
+# SessionMap
 
-**The persistent thinking map for parallel coding agents.**
+> 当人同时驱动多个 AI Agent，真正稀缺的已经不是算力，而是人的注意力连续性。
 
-Maintrail turns Claude Code and Codex transcripts into an external thinking
-tree. Switch back to any line of work and see, in a few seconds, what the goal
-was, which approaches died, what changed direction, and what needs you now.
+终端和 session 记录了发生过什么，却没有保存：为什么走到这里、试过什么、否定了什么、做了什么决定、现在卡在哪里。
 
-It is deliberately not a session dashboard. A top-level object is a piece of
-work, not a terminal or process. Sessions are read-only sources and movable
-cursors: a dead session does not erase its trail, and a replacement session can
-continue growing the same object.
+SessionMap 把 Claude Code、Codex 等 coding agent 散落的对话持续整理成一棵以工作主线为核心的外置思维树。Session 可以结束，思路不会丢；死路也不会被遗忘。它最终只解决一个问题：**让人切回任何一条工作线时，3 秒找回当时的自己。**
 
-![Maintrail showing persistent work mainlines, asks, dead paths, and session cursors](docs/assets/maintrail-overview.png)
+SessionMap 不是 session 看板。一级对象是一件正在推进的工作，不是终端、进程或对话。Session 只是只读数据源和落在树上的光标：旧 session 结束后树仍然存在，新 session 可以继续生长同一条主线。
 
-## What makes it different
+完整产品理念、交互裁决顺序与视觉标准见 [产品与设计宪章](docs/product-design.md)。实现边界见 [架构说明](docs/architecture.md)。
 
-- **Thought structure, not activity tiles.** Goals, attempts, findings,
-  blockers, decisions, and dead paths remain visible as a tree.
-- **Semantic attachment.** The selected roll model decides whether a session
-  continues an existing mainline; cwd and keyword heuristics never decide it.
-- **Object permanence.** Work and session entrances fade or archive, but never
-  silently disappear. A closed terminal becomes a resume action.
-- **Bounded and crash-safe.** Tree and transcript offsets share one atomically
-  replaced JSON file. A roll is committed at-most-once, and model input stays
-  independent of total transcript length.
-- **Local by construction.** No CDN, analytics, telemetry, or transcript
-  writes. The server binds only to `127.0.0.1` and every API requires a private
-  capability token.
+## 核心差异
 
-## Quick start
+- **展示思考结构，而不是活动卡片。** goal、task、attempt、finding、blocker、decision、note 与死路会作为结构永久保留。
+- **用模型判断语义归属。** session 是否继续已有主线、哪里发生转折、用户正在被要求做什么，都由 roll 模型判断；cwd、关键词和正则不能替代这些判断。
+- **对象恒存。** 工作线和 session 入口只会衰减或归档，不会静默消失。终端关闭后，同一入口会变成 resume 动作。
+- **有界且崩溃安全。** 树和 transcript offset 同住一个原子替换的 JSON 文件；roll 按 at-most-once 提交，模型输入不随 transcript 总长度增长。
+- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`，所有 `/api/*` 都需要本机 capability token。
 
-Maintrail is macOS-first. Bun 1.3.13 or newer is required when running from
-source; release binaries embed Bun and the entire web UI.
+## 安装与体验
+
+SessionMap 以原生 macOS 应用为首要入口。应用内嵌 Bun 编译的完整后台服务，不要求用户另装 Bun；菜单栏可查看当前最需要注意的工作线，主窗口使用 WKWebView 承载同一份本地思维图。
+
+正式发布后推荐通过 Homebrew Tap 安装：
 
 ```bash
-git clone https://github.com/hao-cyber/maintrail.git
-cd maintrail
-bun install --frozen-lockfile
-bun run start
+brew install --cask hao-cyber/tap/sessionmap
+open -a SessionMap
 ```
 
-Open `http://127.0.0.1:4317`. Maintrail watches these append-only sources:
+项目进入 Homebrew 官方 Cask 后可简化为：
+
+```bash
+brew install --cask sessionmap
+```
+
+从源码体验：
+
+```bash
+git clone https://github.com/hao-cyber/sessionmap.git
+cd sessionmap
+bun install --frozen-lockfile
+bun run build:app
+open dist/SessionMap.app
+```
+
+只运行本地网页入口：
+
+```bash
+bun run start
+# bun run start 会自动打开带本地 capability 的页面
+# 后台服务已运行时也可执行：sessionmap open
+```
+
+直接输入 `http://127.0.0.1:4317` 不会获得动作权限，这是刻意的安全边界。
+
+生成一份不会读取真实 transcript 的演示树：
+
+```bash
+bun src/cli.ts demo --state-dir /tmp/sessionmap-demo
+bun src/cli.ts serve --state-dir /tmp/sessionmap-demo --no-watch
+```
+
+## 数据来源
+
+SessionMap 只读扫描以下 append-only JSONL：
 
 ```text
 ~/.claude/projects/*/<sessionId>.jsonl
@@ -49,114 +73,85 @@ $CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl
 ~/Library/Application Support/orca/codex-runtime-home/home/sessions/...
 ```
 
-Alternate Codex homes are deduplicated by logical session identity, so an Orca
-mirror cannot replay the same non-idempotent tree growth.
+标准目录、环境变量目录和 Orca 管理的 Codex home 会按 provider + session id 去重。同一个 WAL 即使被镜像到多个路径，也不会重复执行非幂等的 `grow`。
 
-The default roll engine is `claude -p`. Authenticated `codex`, `kimi`, and
-`grok` CLIs appear enabled in the UI selector; an installed but logged-out CLI
-is shown explicitly instead of failing after selection.
+默认 roll 引擎是 `claude -p`。已安装且已登录的 `codex`、`kimi`、`grok` 会出现在应用下拉框中；只安装但未登录的 CLI 会被明确标记，而不是选中后才静默失败。
 
-## Commands
+## 使用方式
+
+- 点击主线标题或带光标的 session 行：切回仍在运行的终端；终端已关则 resume。
+- `⌥` + 点击 session：通过 Orca 向该 session 发话。
+- 右键主线：立即归档；toast 中可以撤销。归档不是删除，后续 roll 仍会继续积累。
+- 双击画布空白或点击 **Fit**：恢复全景。
+- 缩小时只看主线；放大并停稳后，视窗内节点逐层展开。手动折叠始终优先且跨刷新保留。
+
+有 Orca 时，SessionMap 会用最后一条用户消息匹配 `orca worktree ps`，再定位 pane 与 terminal handle，完成切换、复活或发话。没有 Orca 时，macOS 会按 TTY 精确聚焦 iTerm2 / Terminal，并在需要时打开新 Terminal 执行 resume；无 Orca 时不会注入键盘输入。
+
+## 命令行
 
 ```bash
-maintrail serve                 # watcher, serial roll worker, local UI
-maintrail once                  # consume pending transcript increments once
-maintrail install               # install and start a per-user launchd service
-maintrail uninstall             # remove that launchd service
-maintrail status                # summarize durable local state
-maintrail demo                  # seed ~/.maintrail-demo for UI exploration
+sessionmap serve                 # watcher、串行 roll worker、本地 UI
+sessionmap open                  # 安全地打开已运行服务的浏览器入口
+sessionmap once                  # 消费一轮待处理 transcript 增量
+sessionmap install               # 安装并启动当前用户的 launchd 服务
+sessionmap uninstall             # 移除 launchd 服务
+sessionmap status                # 查看持久状态摘要
+sessionmap demo                  # 写入演示状态
 ```
 
-Use `--state-dir PATH`, `--port PORT`, `--no-open`, or `--no-watch` where
-appropriate. Durable state defaults to `~/.maintrail/state.json`; the capability
-token is `~/.maintrail/capability.token` with mode `0600`.
+按命令可使用 `--state-dir PATH`、`--port PORT`、`--no-open`、`--no-watch`。正式状态默认位于：
 
-## How the pipeline stays bounded
+```text
+~/Library/Application Support/SessionMap/state.json
+~/Library/Application Support/SessionMap/capability.token
+```
+
+token 权限固定为 `0600`。从旧版 Maintrail 升级时，首次安装会原子迁移 `~/.maintrail` 中的状态和 token；旧状态保留作回滚依据，新服务验证健康后才移除旧 launchd 入口。
+
+## 有界数据管线
 
 ```text
 Claude / Codex append-only JSONL
-        │  5 s polling · 32 KiB / 90 s linger · 45 s cooldown
+        │  5 秒轮询 · 32 KiB / 90 秒 linger · 45 秒冷却
         ▼
-structural adapter
-        │  user text + assistant text + tool/error metadata · ≤ 12 KiB
+结构信号 adapter
+        │  用户/assistant 文本 + 工具与错误元数据 · ≤ 12 KiB
         ▼
-one-shot semantic roll model
-        │  existing mainlines + current subtree ≤ 120 lines · ≤ 6 ops
+一次性语义 roll 模型
+        │  已有主线 + 当前子树 ≤ 120 行 · ≤ 6 个 op
         ▼
-single-writer runtime
-        │  subtree authorization · offset-before-apply · atomic rename
+单写者 runtime
+        │  子树授权 · offset-before-apply · 原子 rename
         ▼
-state.json ───────────────► local markmap UI
+state.json ───────────────► 本地 SessionMap UI
 ```
 
-The model owns open semantic judgments: mainline attachment, structural turns,
-and whether the agent is waiting for a decision, review, or reply. The runtime
-owns IDs, schema validation, write boundaries, offsets, serialization, and every
-side effect. See [the architecture contract](docs/architecture.md).
+模型只拥有开放语义判断：主线归属、结构性转折、ask 的含义。Runtime 拥有 ID、schema、子树写边界、offset、串行化、幂等策略与所有副作用。模型输出始终按不可信输入处理。
 
-## Navigation and Orca
-
-When Orca is installed, Maintrail matches a session's last user prompt to
-`orca worktree ps`, resolves its pane and terminal handle, then switches,
-resumes, or sends text through the Orca CLI. Without Orca, macOS falls back to
-TTY-precise iTerm2/Terminal focus and opens Terminal for resume. It intentionally
-does not inject keystrokes without Orca.
-
-- Click a mainline or cursor row to focus/resume its best session.
-- Option-click a session row to send it a message.
-- Right-click a mainline to archive it; use the toast to undo.
-- Double-click empty canvas or press **Fit** to restore the full view.
-- Zoom out for mainlines only; pan/zoom and pause to progressively reveal the
-  visible area. Manual folds always win and survive refreshes.
-
-## Build and macOS release
+## 开发、构建与发布
 
 ```bash
-bun run check                  # typecheck, browser parse, 50+ tests, compile
-bun run build                  # dist/maintrail standalone executable
-bun run release:mac            # signed arm64 and x64 release artifacts
+bun run dev               # 开发服务
+bun run check             # 类型、前端语法、回归测试、CLI 与原生构建
+bun run build             # 单文件 sessionmap CLI
+bun run build:app         # 当前架构的 SessionMap.app
+bun run release:mac       # arm64 / x64 签名发布包与 Homebrew Cask
 ```
 
-`release:mac` auto-detects installed **Developer ID Application** and
-**Developer ID Installer** identities. Override them with
-`APPLE_SIGNING_IDENTITY` and `APPLE_INSTALLER_IDENTITY`. Notarization is an
-explicit network action:
+`release:mac` 会自动查找 **Developer ID Application** 证书，对内嵌 Bun 后台使用最小 JIT entitlement，对应用启用 Hardened Runtime，并输出两种架构的 app zip、`SHA256SUMS` 和可提交到 Homebrew Tap 的 `sessionmap.rb`。
+
+公证是明确的网络操作，只有设置开关才会上传到 Apple：
 
 ```bash
-MAINTRAIL_NOTARIZE=1 \
-MAINTRAIL_NOTARY_PROFILE=maintrail-notary \
+SESSIONMAP_NOTARIZE=1 \
+SESSIONMAP_NOTARY_PROFILE=sessionmap-notary \
 bun run release:mac
 ```
 
-The script emits separately signed arm64 and x64 zips, optional signed pkgs, and
-`SHA256SUMS`. Bun publishes architecture-specific standalone targets rather
-than a universal target. The script never uploads for notarization unless the
-flag is present.
+公证通过后脚本会 staple ticket、执行 Gatekeeper 评估，再生成最终 zip。Bun 当前按架构发布 standalone executable，因此 arm64 与 x64 分开构建，不伪装成 universal binary。
 
-Developer ID builds retain the minimal JavaScriptCore JIT entitlements required
-by [Bun's macOS signing guide](https://bun.com/docs/guides/runtime/codesign-macos-executable),
-while library validation and DYLD environment protection remain enabled.
+回归测试覆盖损坏状态修复、跨主线越权、reattach 只读边界、巨行与半行 JSONL、自噬排除、12 KiB 硬上限、at-most-once 崩溃窗口、命令转义、Markdown / HTML 注入、capability 鉴权与 Origin / media type 校验。
 
-For a release zip, unpack the artifact and run `./maintrail install`. The
-compiled executable copies itself atomically to `~/.local/bin/maintrail` before
-installing the launch agent, so removing the download cannot break the service.
-
-## Development
-
-```bash
-bun run dev
-bun test
-bun run typecheck
-bun run check:web
-```
-
-UI assets are vendored under `web/vendor`; network-loaded runtime assets are a
-bug. Regression tests cover corrupt-state repair, cross-mainline writes,
-reattach boundaries, giant and partial JSONL lines, self-ingestion, hard input
-caps, at-most-once crash windows, command quoting, Markdown/HTML injection,
-capability auth, and Origin/media-type enforcement.
-
-Please read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing behavior changes
-and report sensitive findings as described in [SECURITY.md](SECURITY.md).
+贡献前请阅读 [贡献指南](CONTRIBUTING.md)。安全问题请按 [安全策略](SECURITY.md) 私下报告。
 
 MIT © 2026 Hao

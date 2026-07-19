@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionRecord, TranscriptMeta } from "../src/types.ts";
 
-export function temporaryDirectory(prefix = "maintrail-test-"): string {
+export function temporaryDirectory(prefix = "sessionmap-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
@@ -41,6 +41,7 @@ export function sessionRecord(id: string, cwd: string): SessionRecord {
     rootId: null,
     cursor: null,
     ask: { kind: "none", hint: "" },
+    snapshot: { summary: "安全会话", progress: "等待下一步", trail: [], at: now },
     status: "idle",
     terminalOpen: false,
     lastTranscriptAt: now,

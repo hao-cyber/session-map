@@ -2,8 +2,8 @@ import { chmodSync, mkdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const pkg = JSON.parse(readFileSync(resolve(import.meta.dir, "..", "package.json"), "utf8")) as { version: string };
-const target = process.env.MAINTRAIL_TARGET;
-const output = resolve(process.env.MAINTRAIL_OUTFILE ?? resolve(import.meta.dir, "..", "dist", "maintrail"));
+const target = process.env.SESSIONMAP_TARGET;
+const output = resolve(process.env.SESSIONMAP_OUTFILE ?? resolve(import.meta.dir, "..", "dist", "sessionmap"));
 
 mkdirSync(dirname(output), { recursive: true });
 rmSync(output, { force: true });
@@ -15,7 +15,7 @@ const command = [
   "--compile",
   "--minify",
   `--outfile=${output}`,
-  `--define=__MAINTRAIL_VERSION__=${JSON.stringify(pkg.version)}`,
+  `--define=__SESSIONMAP_VERSION__=${JSON.stringify(pkg.version)}`,
 ];
 if (target) command.push(`--target=${target}`);
 

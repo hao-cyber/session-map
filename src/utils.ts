@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { MAINLINE_NAME_CHARS, NODE_LABEL_CHARS, NOTE_CHARS } from "./constants.ts";
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -66,8 +66,16 @@ export function escapeMarkdown(value: unknown): string {
   return escapeHtml(value).replaceAll(/[\[\]()\\*~_]/g, (char) => MARKDOWN_ENTITIES[char] ?? char);
 }
 
+export function defaultStateDirectory(home = homedir()): string {
+  return resolve(join(home, "Library", "Application Support", "SessionMap"));
+}
+
+export function legacyStateDirectory(home = homedir()): string {
+  return resolve(join(home, ".maintrail"));
+}
+
 export function stateDirectory(explicit?: string): string {
-  return resolve(explicit ?? process.env.MAINTRAIL_STATE_DIR ?? `${homedir()}/.maintrail`);
+  return resolve(explicit ?? process.env.SESSIONMAP_STATE_DIR ?? defaultStateDirectory());
 }
 
 export function sleep(ms: number): Promise<void> {

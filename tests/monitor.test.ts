@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mergeRuntimeState, processForSession } from "../src/monitor.ts";
+import { mergeRuntimeState, parseLsofTranscriptProcesses, processForSession } from "../src/monitor.ts";
 import { sessionRecord } from "./helpers.ts";
 
 describe("session monitor state merge", () => {
@@ -42,5 +42,26 @@ describe("session monitor state merge", () => {
     codex.provider = "claude";
     expect(processForSession(codex, rows)?.pid).toBe(2);
     expect(processForSession({ ...codex, id: "missing" }, rows)).toBeUndefined();
+  });
+
+  test("links initial Codex and Claude processes by their read-only open transcripts", () => {
+    const output = [
+      "p30538",
+      "f0",
+      "n/dev/ttys000",
+      "f41",
+      "n/Users/example/.codex/sessions/2026/07/19/rollout-2026-07-19T15-51-02-11111111-1111-4111-8111-111111111111.jsonl",
+      "p41200",
+      "f0",
+      "n/dev/ttys004",
+      "f22",
+      "n/Users/example/.claude/projects/-Users-example-Code/22222222-2222-4222-8222-222222222222.jsonl",
+      "p50000",
+      "n/Users/example/random.jsonl",
+    ].join("\n");
+    expect(parseLsofTranscriptProcesses(output)).toEqual([
+      { pid: 30538, tty: "/dev/ttys000", command: "open transcript", sessionId: "11111111-1111-4111-8111-111111111111" },
+      { pid: 41200, tty: "/dev/ttys004", command: "open transcript", sessionId: "22222222-2222-4222-8222-222222222222" },
+    ]);
   });
 });

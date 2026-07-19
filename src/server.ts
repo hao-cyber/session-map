@@ -14,7 +14,7 @@ import { ActionRouter } from "./actions.ts";
 import { AssetStore } from "./assets.ts";
 import { Logger } from "./logger.ts";
 import { SessionMonitor } from "./monitor.ts";
-import { detectEngines } from "./roll.ts";
+import { detectEngines, engineAvailabilitySnapshot } from "./roll.ts";
 import { StateStore } from "./state.ts";
 import { TreeRuntime } from "./tree.ts";
 import type { EngineName } from "./types.ts";
@@ -162,7 +162,7 @@ function archivedRows(state: ReturnType<StateStore["snapshot"]>) {
   });
 }
 
-export class MaintrailHttpServer {
+export class SessionMapHttpServer {
   readonly hostname: string;
   readonly requestedPort: number;
   readonly assets: AssetStore;
@@ -172,7 +172,7 @@ export class MaintrailHttpServer {
 
   constructor(readonly dependencies: ServerDependencies, options: ServerOptions) {
     this.hostname = options.hostname ?? DEFAULT_HOST;
-    if (this.hostname !== "127.0.0.1") throw new Error("Maintrail must bind to 127.0.0.1");
+    if (this.hostname !== "127.0.0.1") throw new Error("SessionMap must bind to 127.0.0.1");
     this.requestedPort = options.port ?? DEFAULT_PORT;
     this.assets = dependencies.assets ?? new AssetStore();
     this.logger = dependencies.logger ?? new Logger(join(options.stateDirectory, "server.log"));
@@ -192,6 +192,11 @@ export class MaintrailHttpServer {
     return `http://${this.hostname}:${this.server.port}`;
   }
 
+  browserUrl(shell = false): string {
+    const query = shell ? "?shell=mac" : "";
+    return `${this.url}/${query}#cap=${encodeURIComponent(this.token)}`;
+  }
+
   stop(): void {
     this.server.stop(true);
   }
@@ -205,12 +210,15 @@ export class MaintrailHttpServer {
     }
     try {
       if (requestUrl.pathname === "/" && request.method === "GET") return this.index();
+      if (requestUrl.pathname === "/health" && request.method === "GET") {
+        return json({ ok: true, name: "SessionMap" });
+      }
       if (requestUrl.pathname === "/favicon.ico" && request.method === "GET") return new Response(null, { status: 204 });
       if (requestUrl.pathname.startsWith("/assets/") && request.method === "GET") {
         return this.asset(requestUrl.pathname.slice("/assets/".length));
       }
       if (!requestUrl.pathname.startsWith("/api/")) return text("not found", 404);
-      if (!secureEquals(request.headers.get("x-maintrail-token") ?? "", this.token)) {
+      if (!secureEquals(request.headers.get("x-sessionmap-token") ?? "", this.token)) {
         return json({ error: "invalid capability token" }, 401);
       }
       if (request.method === "GET" && requestUrl.pathname === "/api/snapshot") return this.snapshot();
@@ -229,9 +237,8 @@ export class MaintrailHttpServer {
     if (!source) return text("index asset unavailable", 500);
     const nonce = randomBytes(18).toString("base64url");
     const body = source.body
-      .replaceAll("__MAINTRAIL_TOKEN__", this.token)
-      .replaceAll("__MAINTRAIL_NONCE__", nonce)
-      .replaceAll("__MAINTRAIL_ASSET_VERSION__", String(this.assets.version()));
+      .replaceAll("__SESSIONMAP_NONCE__", nonce)
+      .replaceAll("__SESSIONMAP_ASSET_VERSION__", String(this.assets.version()));
     return new Response(body, {
       headers: {
         "Cache-Control": "no-store",
@@ -280,7 +287,7 @@ export class MaintrailHttpServer {
       git: this.dependencies.monitor.gitChips(),
       archived: archivedRows(state),
       engine: state.engine,
-      engines: detectEngines().map(({ name, available, reason }) => ({ name, available, ...(reason ? { reason } : {}) })),
+      engines: engineAvailabilitySnapshot().map(({ name, available, reason }) => ({ name, available, ...(reason ? { reason } : {}) })),
       assetVersion: this.assets.version(),
     });
   }

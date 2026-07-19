@@ -3,7 +3,7 @@ import { basename } from "node:path";
 import { GIT_POLL_MS, STATUS_POLL_MS } from "./constants.ts";
 import { Logger } from "./logger.ts";
 import { enginePath } from "./roll.ts";
-import { matchOrcaSession, orcaPath, readOrcaSnapshot } from "./orca.ts";
+import { matchOrcaSession, readOrcaSnapshot } from "./orca.ts";
 import { StateStore } from "./state.ts";
 import type { GitChip, SessionRecord, SessionStatus } from "./types.ts";
 import { isRecord, safeJsonParse, truncateBytes } from "./utils.ts";
@@ -15,6 +15,7 @@ type ClaudeAgent = {
 };
 
 export type ProcessRow = { pid: number; tty: string; command: string };
+export type TranscriptProcessRow = ProcessRow & { sessionId: string };
 
 async function runText(command: string[], timeoutMs = 5_000): Promise<{ ok: boolean; text: string }> {
   const proc = Bun.spawn(command, { stdout: "pipe", stderr: "pipe", stdin: "ignore" });
@@ -74,6 +75,52 @@ async function readProcesses(): Promise<ProcessRow[]> {
     rows.push({ pid: Number(match[1]), tty: match[2] ?? "", command: match[3] ?? "" });
   }
   return rows;
+}
+
+function sessionIdForOpenTranscript(path: string): string | null {
+  if (!path.endsWith(".jsonl")) return null;
+  const codex = path.match(/\/sessions\/\d{4}\/\d{2}\/\d{2}\/rollout-.+?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i);
+  if (codex?.[1]) return codex[1];
+  if (!path.includes("/.claude/projects/")) return null;
+  const name = basename(path, ".jsonl");
+  return /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(name) ? name : null;
+}
+
+/** Parse one macOS lsof -Fpn stream into exact transcript-to-process links. */
+export function parseLsofTranscriptProcesses(output: string): TranscriptProcessRow[] {
+  type OpenProcess = { pid: number; tty: string; sessionIds: Set<string> };
+  const processes: OpenProcess[] = [];
+  let current: OpenProcess | null = null;
+  for (const line of output.split("\n")) {
+    if (line.startsWith("p") && /^p\d+$/.test(line)) {
+      current = { pid: Number(line.slice(1)), tty: "", sessionIds: new Set() };
+      processes.push(current);
+      continue;
+    }
+    if (!current || !line.startsWith("n")) continue;
+    const name = line.slice(1);
+    if (!current.tty && /^\/dev\/tty\w+$/.test(name)) current.tty = name;
+    const sessionId = sessionIdForOpenTranscript(name);
+    if (sessionId) current.sessionIds.add(sessionId);
+  }
+  return processes.flatMap((process) => [...process.sessionIds].map((sessionId) => ({
+    pid: process.pid,
+    tty: process.tty,
+    command: "open transcript",
+    sessionId,
+  })));
+}
+
+/**
+ * Initial Codex/Claude processes often omit the session id from argv. Both
+ * providers keep their append-only transcript open, which gives us an exact,
+ * read-only process link without cwd heuristics or Orca.
+ */
+async function readTranscriptProcesses(): Promise<TranscriptProcessRow[]> {
+  const lsof = "/usr/sbin/lsof";
+  if (!existsSync(lsof)) return [];
+  const result = await runText([lsof, "-n", "-P", "-Fpn", "-c", "codex", "-c", "claude"], 5_000);
+  return result.ok ? parseLsofTranscriptProcesses(result.text) : [];
 }
 
 function mapAgentStatus(value: string, updatedAt: number, now: number): SessionStatus {
@@ -172,10 +219,11 @@ export class SessionMonitor {
 
   async refreshStatuses(): Promise<void> {
     try {
-      const [orca, claudeAgents, processes] = await Promise.all([
+      const [orca, claudeAgents, processes, transcriptProcesses] = await Promise.all([
         readOrcaSnapshot(),
         readClaudeAgents(),
         readProcesses(),
+        readTranscriptProcesses(),
       ]);
       const snapshot = this.store.snapshot();
       const patches = new Map<string, SessionRecord>();
@@ -186,17 +234,22 @@ export class SessionMonitor {
         const claudeAgent = session.provider === "claude"
           ? claudeAgents.find((agent) => agent.id === session.id)
           : undefined;
-        const process = processForSession(session, processes);
+        const process = transcriptProcesses.find((candidate) => candidate.sessionId === session.id)
+          ?? processForSession(session, processes);
         const terminal = orcaMatch.terminal;
-        const preciseTerminalState = orca.available || !orcaPath();
-        if (preciseTerminalState) next.terminalOpen = Boolean(terminal?.connected || process || claudeAgent);
+        // Orca is an optional source, not an authority gate.  A locally
+        // installed but closed Orca app must never freeze the last observed
+        // terminal state.  Every poll combines all available live evidence;
+        // no evidence means the durable session entry remains, but its
+        // terminal is closed and therefore resumable.
+        next.terminalOpen = Boolean(terminal?.connected || process || claudeAgent);
         if (terminal?.handle) next.terminalHandle = terminal.handle;
-        else if (preciseTerminalState) delete next.terminalHandle;
+        else delete next.terminalHandle;
         if (orcaMatch.paneKey) next.paneKey = orcaMatch.paneKey;
-        else if (preciseTerminalState) delete next.paneKey;
+        else delete next.paneKey;
         const pid = claudeAgent?.pid ?? process?.pid;
         if (pid) next.pid = pid;
-        else if (preciseTerminalState) delete next.pid;
+        else delete next.pid;
 
         const transcriptAge = Math.max(0, now - Date.parse(session.lastTranscriptAt));
         if (orcaMatch.agent) {
@@ -205,7 +258,7 @@ export class SessionMonitor {
           next.status = mapAgentStatus(claudeAgent.status, Date.parse(session.lastTranscriptAt), now);
         } else if (next.terminalOpen) {
           next.status = transcriptAge <= 30_000 ? "busy" : transcriptAge <= 10 * 60_000 ? "recent" : "idle";
-        } else if (preciseTerminalState) {
+        } else {
           next.status = "closed";
         }
         next.lastStatusAt = new Date(now).toISOString();
@@ -253,4 +306,4 @@ export class SessionMonitor {
   }
 }
 
-export { readClaudeAgents, readProcesses, runText };
+export { readClaudeAgents, readProcesses, readTranscriptProcesses, runText };
