@@ -270,7 +270,7 @@ textarea:focus-visible,
 
 .fm-mainline {
   min-width: 236px;
-  min-height: 38px;
+  min-height: 40px;
   gap: 9px;
   padding: 7px 10px;
   color: var(--ink);
@@ -305,8 +305,8 @@ textarea:focus-visible,
 .fm-session:active { background: rgba(32, 33, 36, 0.075); }
 
 .session-copy { min-width: 0; display: inline-flex; flex-direction: column; gap: 2px; }
-.session-title { max-width: 250px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-weight: 630; }
-.session-progress { max-width: 250px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 9px; }
+.session-title { max-width: 250px; overflow: hidden; text-overflow: ellipsis; color: var(--ink-soft); font-size: 12px; font-weight: 630; }
+.session-progress { max-width: 250px; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 10px; }
 .session-meta { display: inline-flex; flex-direction: column; align-items: flex-end; gap: 2px; margin-left: auto; }
 .session-provider {
   color: var(--faint);
@@ -318,7 +318,7 @@ textarea:focus-visible,
 .session-state-word { color: var(--muted); font-size: 9px; font-weight: 680; }
 .session-context-toggle {
   min-width: 42px;
-  min-height: 25px;
+  min-height: 32px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -335,7 +335,7 @@ textarea:focus-visible,
 .session-context-toggle:hover, .session-context-toggle:focus-visible { color: var(--ink); background: var(--surface-hover); outline: none; }
 .session-jump-action {
   min-width: 38px;
-  min-height: 25px;
+  min-height: 32px;
   margin: -2px -3px -2px 0;
   padding: 0 7px;
   border: 1px solid var(--line);
@@ -366,13 +366,27 @@ textarea:focus-visible,
   min-width: 226px;
   min-height: 31px;
   color: var(--muted);
-  border: 1px dashed #d6d8dd;
-  background: rgba(255, 255, 255, 0.38);
+  border: 0;
+  background: transparent;
 }
 .thought-kicker { color: var(--ink-soft); font-size: 10px; font-weight: 700; letter-spacing: 0.05em; }
 .thought-focus { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 .thought-meta { margin-left: auto; color: var(--faint); font-size: 9px; font-weight: 650; }
-.snapshot-trail { max-width: 420px; color: var(--muted); font-size: 10px; }
+.snapshot-trail {
+  min-height: 26px;
+  max-width: 420px;
+  padding-block: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 450;
+}
+
+.fm-node {
+  min-height: 28px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 520;
+}
 
 .state-dot,
 .busy-dot,
