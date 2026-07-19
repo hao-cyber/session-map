@@ -27,9 +27,10 @@ SessionMap 是本机 Bun 后台提供的同一份地图文档。系统浏览器�
 目前支持 macOS 13 及以上的 Apple Silicon 和 Intel Mac。普通用户从
 [GitHub Releases](https://github.com/hao-cyber/session-map/releases) 下载最新的
 `SessionMap-<版本>.pkg`，双击后系统 Installer 会自动完成安装并打开 SessionMap App；不需要
-安装 Bun、Homebrew 或使用终端。
+安装 Bun、Homebrew 或使用终端。仓库保持私有测试期间，下载者需要先被授予仓库访问权限；
+公开后同一安装包链接可直接面向所有人。
 
-开发者也可以使用 Homebrew：
+仓库公开后会同时启用 Homebrew tap，开发者可以使用：
 
 ```bash
 brew install hao-cyber/tap/sessionmap
@@ -44,7 +45,7 @@ brew upgrade sessionmap
 sessionmap install
 ```
 
-不使用安装包或 Homebrew 时，可以运行会验证 SHA-256 的 beta 安装脚本：
+仓库公开后，不使用安装包或 Homebrew 时也可以运行会验证 SHA-256 的安装脚本：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/hao-cyber/session-map/v0.1.0-beta.1/scripts/install.sh \
