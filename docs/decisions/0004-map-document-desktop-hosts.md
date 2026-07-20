@@ -4,6 +4,8 @@
 > 日期：2026-07-20  
 > 替代：[ADR 0001](0001-standalone-release-channels.md) 中“不生成 App、系统浏览器是唯一容器”的部分；
 > 其余 standalone CLI、单写者、安装事务与回滚决策继续有效。
+> 局部替代：Web 的独立 Now 状态条由 [ADR 0005](0005-integrate-attention-into-directory.md)
+> 替代；`sessionmap now` 与共享行动优先级投影继续有效。
 
 ## 背景与约束
 

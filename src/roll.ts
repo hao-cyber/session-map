@@ -209,6 +209,12 @@ export function detectEngines(): EngineAvailability[] {
   return availabilityFromCache(now, false);
 }
 
+export async function detectEnginesAsync(): Promise<EngineAvailability[]> {
+  if (process.env.SESSIONMAP_SKIP_ENGINE_PROBES === "1") return detectEngines();
+  await refreshEngineAuth();
+  return availabilityFromCache(Date.now(), false);
+}
+
 function rootLines(state: TrailState, rootId: string, maxLines: number): string[] {
   const lines: string[] = [];
   const stack: Array<{ id: string; depth: number }> = [{ id: rootId, depth: 0 }];
@@ -261,7 +267,12 @@ function boundedMainlineList(state: TrailState, preferredRoot: string | null): s
   return output.trimEnd() || "(none)";
 }
 
-export function buildRollPrompt(state: TrailState, session: SessionRecord | undefined, delta: string): string {
+export function buildRollPrompt(
+  state: TrailState,
+  session: SessionRecord | undefined,
+  delta: string,
+  options: { historical?: boolean; reconcile?: boolean } = {},
+): string {
   const subtree = session?.rootId && state.nodes[session.rootId]
     ? rootLines(state, session.rootId, MAX_SUBTREE_LINES).join("\n")
     : "(session is not attached yet)";
@@ -269,6 +280,11 @@ export function buildRollPrompt(state: TrailState, session: SessionRecord | unde
   const currentSnapshot = session
     ? JSON.stringify(session.snapshot)
     : "(no snapshot yet)";
+  const historyContract = options.historical
+    ? options.reconcile
+      ? `\nHISTORICAL RECONCILIATION\n- This increment is older context discovered after newer activity was already mapped.\n- Preserve the current direction. Add only genuinely missing historical background or explicit revision relationships.\n- Do not close, unblock, rename, or refocus existing nodes based only on this older context.\n- Prefer no ops when the context is already represented. The snapshot may be clarified but must still describe the current session state.\n`
+      : `\nHISTORICAL IMPORT\n- This is a chronological chunk from a user-confirmed historical session import.\n- Treat it as normal evidence in its original order; later chunks may revise it.\n`
+    : "";
   return `${ROLL_SENTINEL}
 
 You update a persistent external thinking tree for a developer who runs many coding agents in parallel.
@@ -309,6 +325,7 @@ RUNTIME CONTRACT
 - The runtime allocates ids and rejects cross-mainline writes. Never invent an id for an existing node.
 - unblock applies only to a waiting node. resolved/dead outcomes cannot be reopened; represent reconsideration with grow.
 - ask.kind is decision, review, reply, or none. This is a semantic judgment about what the user is being asked to do now.
+${historyContract}
 
 OUTPUT SHAPE
 {"mainline":"existing or new semantic mainline","ask":{"kind":"decision|review|reply|none","hint":"short"},"snapshot":{"summary":"whole-session headline","progress":"latest meaningful state","trail":["causal breadcrumb"]},"ops":[]}
@@ -463,7 +480,7 @@ export async function callRollEngine(
   cwd: string,
   timeoutMs = ROLL_TIMEOUT_MS,
 ): Promise<RollOutput> {
-  const availability = detectEngines().find((entry) => entry.name === name);
+  const availability = (await detectEnginesAsync()).find((entry) => entry.name === name);
   const executable = availability?.path;
   if (!availability?.available || !executable) {
     throw new Error(`roll engine ${name} is not available${availability?.reason ? ` (${availability.reason})` : ""}`);

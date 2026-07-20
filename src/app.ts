@@ -39,6 +39,7 @@ export class SessionMapApp {
         runtime: this.runtime,
         actions: this.actions,
         monitor: this.monitor,
+        watcher: this.watcher,
         logger: this.logger,
       }, {
         stateDirectory: options.stateDirectory,

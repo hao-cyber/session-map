@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { InstanceLock, StateStore, createEmptyState, repairState } from "../src/state.ts";
+import { InstanceLock, StateStore, containingGitWorktree, createEmptyState, repairState } from "../src/state.ts";
 import { TreeRuntime } from "../src/tree.ts";
 import {
   SCHEMA_VERSION,
@@ -28,6 +28,13 @@ describe("durable state", () => {
     expect(statSync(store.statePath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(store.statePath, "utf8")).offsets.example.offset).toBe(9);
     expect(readdirSync(root).some((name) => name.endsWith(".tmp"))).toBeFalse();
+  });
+
+  test("refuses to write user state anywhere inside a Git worktree", () => {
+    const nested = join(process.cwd(), ".sessionmap-private-state");
+    expect(containingGitWorktree(nested)).toBe(process.cwd());
+    expect(() => new StateStore(nested)).toThrow("must stay outside Git worktrees");
+    expect(existsSync(nested)).toBeFalse();
   });
 
   test("serializes concurrent writers without losing updates", async () => {
@@ -69,6 +76,7 @@ describe("durable state", () => {
     const at = new Date().toISOString();
     const raw = createEmptyState();
     raw.schemaVersion = 1;
+    raw.intake = undefined as never;
     raw.sessions.legacy = {
       id: "legacy", provider: "claude", path: "p", cwd: "", title: "旧版完整会话标题", lastUser: "", mainline: null, rootId: null, cursor: null,
       ask: { kind: "none", hint: "" },
@@ -88,6 +96,18 @@ describe("durable state", () => {
       at,
     });
     expect(result.state.sessions.legacy?.firstSeenAt).toBe(at);
+    expect(result.state.intake.phase).toBe("complete");
+  });
+
+  test("starts a truly empty installation at the history choice", () => {
+    const state = createEmptyState();
+    expect(state.intake).toEqual({
+      phase: "awaiting-choice",
+      coverageStartAt: null,
+      lastDiscoveryAt: null,
+      imported: {},
+      job: null,
+    });
   });
 
   test("keeps a session first-seen time stable across later transcript activity", async () => {
@@ -216,6 +236,41 @@ describe("tree write boundary", () => {
     expect(store.snapshot().nodes[line.rootId]).toBeDefined();
     await runtime.restore(line.rootId);
     expect(store.snapshot().archived).not.toContain(line.rootId);
+  });
+
+  test("explicit session deletion persists exclusion and only removes an unshared theme", async () => {
+    const store = new StateStore(directory());
+    const runtime = new TreeRuntime(store);
+    const firstMeta = transcriptMeta("private-a", process.cwd());
+    firstMeta.provider = "codex";
+    const secondMeta = transcriptMeta("private-b", process.cwd());
+    secondMeta.provider = "codex";
+    const line = await runtime.applyRoll(firstMeta, {
+      mainline: "共享主题",
+      ask: { kind: "none", hint: "" },
+      ops: [{ op: "grow", parent: "mainline", type: "note", label: "共享判断" }],
+    });
+    await runtime.applyRoll(secondMeta, { mainline: "共享主题", ask: { kind: "none", hint: "" }, ops: [] });
+    await store.update((state) => {
+      state.offsets[firstMeta.path] = {
+        path: firstMeta.path, provider: "codex", sessionId: firstMeta.sessionId,
+        offset: 42, mtimeMs: 1, cooldownUntil: 0,
+      };
+      state.intake.imported[`codex:${firstMeta.sessionId}`] = new Date().toISOString();
+    });
+
+    const shared = await runtime.deleteSession(firstMeta.sessionId);
+    expect(shared).toEqual({ ok: true, removedRoot: false, remainingSessions: 1 });
+    expect(store.snapshot().sessions[firstMeta.sessionId]).toBeUndefined();
+    expect(store.snapshot().excludedSessions[`codex:${firstMeta.sessionId}`]).toBeString();
+    expect(store.snapshot().offsets[firstMeta.path]).toBeUndefined();
+    expect(store.snapshot().intake.imported[`codex:${firstMeta.sessionId}`]).toBeUndefined();
+    expect(store.snapshot().nodes[line.rootId]).toBeDefined();
+
+    const last = await runtime.deleteSession(secondMeta.sessionId);
+    expect(last).toEqual({ ok: true, removedRoot: true, remainingSessions: 0 });
+    expect(store.snapshot().nodes[line.rootId]).toBeUndefined();
+    expect(store.snapshot().roots).not.toContain(line.rootId);
   });
 
   test("closed nodes keep their recorded labels", async () => {

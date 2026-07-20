@@ -15,10 +15,11 @@ import { AssetStore } from "./assets.ts";
 import { Logger } from "./logger.ts";
 import { SessionMonitor } from "./monitor.ts";
 import { verifyOpenTicket } from "./open.ts";
-import { detectEngines, engineAvailabilitySnapshot } from "./roll.ts";
+import { detectEnginesAsync, engineAvailabilitySnapshot } from "./roll.ts";
 import { StateStore } from "./state.ts";
 import { TreeRuntime } from "./tree.ts";
 import type { EngineName } from "./types.ts";
+import type { TranscriptWatcher } from "./watcher.ts";
 import { activeSessionCount, buildNowItems, renderMarkdown } from "./render.ts";
 import { isRecord } from "./utils.ts";
 
@@ -27,6 +28,7 @@ export interface ServerDependencies {
   runtime: TreeRuntime;
   actions: ActionRouter;
   monitor: SessionMonitor;
+  watcher?: TranscriptWatcher;
   assets?: AssetStore;
   logger?: Logger;
 }
@@ -301,6 +303,13 @@ export class SessionMapHttpServer {
       archived: archivedRows(state),
       engine: state.engine,
       engines: engineAvailabilitySnapshot().map(({ name, available, reason }) => ({ name, available, ...(reason ? { reason } : {}) })),
+      intake: this.dependencies.watcher?.intakeView() ?? {
+        phase: state.intake.phase,
+        coverageStartAt: state.intake.coverageStartAt,
+        lastDiscoveryAt: state.intake.lastDiscoveryAt,
+        inventory: { total: 0, providers: {}, ranges: [], activity: [] },
+        job: null,
+      },
       assetVersion: this.assets.version(),
     });
   }
@@ -360,17 +369,57 @@ export class SessionMapHttpServer {
       if (!ok) throw new HttpError(404, "unknown mainline");
       return json({ ok: true });
     }
+    if (path === "/api/session/delete") {
+      if (typeof body.sessionId !== "string") throw new HttpError(400, "sessionId is required");
+      const result = await this.dependencies.runtime.deleteSession(body.sessionId);
+      if (!result.ok) throw new HttpError(404, "unknown session");
+      return json(result);
+    }
     if (path === "/api/engine") {
       if (typeof body.engine !== "string" || !(ENGINE_NAMES as readonly string[]).includes(body.engine)) {
         throw new HttpError(400, "unknown roll engine");
       }
       const engine = body.engine as EngineName;
-      const availability = detectEngines().find((entry) => entry.name === engine);
+      const availability = (await detectEnginesAsync()).find((entry) => entry.name === engine);
       if (!availability?.available) {
         throw new HttpError(409, `roll engine ${engine} is not available${availability?.reason ? ` (${availability.reason})` : ""}`);
       }
       await this.dependencies.store.update((state) => { state.engine = engine; });
       return json({ ok: true, engine });
+    }
+    if (path.startsWith("/api/intake/")) {
+      const watcher = this.dependencies.watcher;
+      if (!watcher) throw new HttpError(503, "intake coordinator is unavailable");
+      if (path === "/api/intake/check") return json(await watcher.checkNow());
+      if (path === "/api/intake/start") {
+        if (body.cutoffAt !== null && typeof body.cutoffAt !== "string") {
+          throw new HttpError(400, "cutoffAt must be an ISO date or null");
+        }
+        if (typeof body.cutoffAt === "string") {
+          const cutoff = Date.parse(body.cutoffAt);
+          if (!Number.isFinite(cutoff) || cutoff > Date.now() + 60_000) throw new HttpError(400, "invalid history cutoff");
+          const needsRoll = watcher.intakeView().inventory.activity.some((item) => item.mtimeMs >= cutoff);
+          if (needsRoll) {
+            const engine = this.dependencies.store.snapshot().engine;
+            const availability = (await detectEnginesAsync()).find((entry) => entry.name === engine);
+            if (!availability?.available) {
+              throw new HttpError(409, `roll engine ${engine} is not available${availability?.reason ? ` (${availability.reason})` : ""}`);
+            }
+          }
+        }
+        try {
+          return json(await watcher.chooseHistory(body.cutoffAt as string | null));
+        } catch (error) {
+          throw new HttpError(409, error instanceof Error ? error.message : String(error));
+        }
+      }
+      try {
+        if (path === "/api/intake/pause") return json(await watcher.pauseHistory());
+        if (path === "/api/intake/resume") return json(await watcher.resumeHistory());
+        if (path === "/api/intake/cancel") return json(await watcher.cancelHistory());
+      } catch (error) {
+        throw new HttpError(409, error instanceof Error ? error.message : String(error));
+      }
     }
     throw new HttpError(404, "unknown API endpoint");
   }

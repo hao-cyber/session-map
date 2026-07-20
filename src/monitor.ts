@@ -37,6 +37,26 @@ async function runText(command: string[], timeoutMs = 5_000): Promise<{ ok: bool
   }
 }
 
+export async function readGitWorkspace(cwd: string, run: TextRunner = runText): Promise<GitChip | null> {
+  const [status, branch, ahead, worktree] = await Promise.all([
+    run(["git", "-C", cwd, "status", "--porcelain=v1", "--untracked-files=normal"]),
+    run(["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"]),
+    run(["git", "-C", cwd, "rev-list", "--count", "@{upstream}..HEAD"]),
+    run(["git", "-C", cwd, "rev-parse", "--show-toplevel"]),
+  ]);
+  if (!status.ok || !worktree.ok) return null;
+  const root = truncateBytes(worktree.text.trim(), 1_024);
+  if (!root) return null;
+  return {
+    cwd,
+    worktree: root,
+    name: basename(root) || root,
+    branch: branch.ok ? truncateBytes(branch.text.trim(), 120) : "detached",
+    dirty: status.text.split("\n").filter(Boolean).length,
+    ahead: ahead.ok ? Number.parseInt(ahead.text.trim(), 10) || 0 : 0,
+  };
+}
+
 async function readClaudeAgents(): Promise<ClaudeAgent[]> {
   const claude = enginePath("claude");
   if (!claude) return [];
@@ -310,24 +330,10 @@ export class SessionMonitor {
       .filter((cwd) => cwd && existsSync(cwd));
     const chips: GitChip[] = [];
     await Promise.all(directories.map(async (cwd) => {
-      const [status, branch, ahead] = await Promise.all([
-        runText(["git", "-C", cwd, "status", "--porcelain=v1", "--untracked-files=normal"]),
-        runText(["git", "-C", cwd, "symbolic-ref", "--quiet", "--short", "HEAD"]),
-        runText(["git", "-C", cwd, "rev-list", "--count", "@{upstream}..HEAD"]),
-      ]);
-      if (!status.ok) return;
-      const dirty = status.text.split("\n").filter(Boolean).length;
-      const aheadCount = ahead.ok ? Number.parseInt(ahead.text.trim(), 10) || 0 : 0;
-      if (!dirty && !aheadCount) return;
-      chips.push({
-        cwd,
-        name: basename(cwd) || cwd,
-        branch: branch.ok ? truncateBytes(branch.text.trim(), 120) : "detached",
-        dirty,
-        ahead: aheadCount,
-      });
+      const workspace = await readGitWorkspace(cwd);
+      if (workspace) chips.push(workspace);
     }));
-    chips.sort((left, right) => left.name.localeCompare(right.name));
+    chips.sort((left, right) => left.name.localeCompare(right.name) || left.cwd.localeCompare(right.cwd));
     this.#gitChips = chips;
     this.#lastGitAt = Date.now();
   }

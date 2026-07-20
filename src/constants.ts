@@ -1,5 +1,5 @@
 export const APP_NAME = "sessionmap";
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 5;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4317;
 
@@ -11,6 +11,10 @@ export const LINGER_MS = 90_000;
 export const LINGER_BYTES = 32 * 1024;
 export const SESSION_COOLDOWN_MS = 45_000;
 export const MAX_ACTIVE_SESSIONS = 60;
+export const MAX_ROLL_CONCURRENCY = 3;
+export const MAX_HISTORY_ROLLS = 2;
+export const HISTORY_QUEUE_BUFFER = 4;
+export const HISTORY_RANGE_DAYS = [7, 30, 90] as const;
 export const MAX_READ_BYTES = 4 * 1024 * 1024;
 export const GIANT_LINE_BYTES = 2 * 1024 * 1024;
 export const MAX_DELTA_BYTES = 12 * 1024;

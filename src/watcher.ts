@@ -1,10 +1,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  HISTORY_RANGE_DAYS,
+  HISTORY_QUEUE_BUFFER,
   LINGER_BYTES,
   LINGER_MS,
   MAX_ACTIVE_SESSIONS,
-  MAX_READ_BYTES,
+  MAX_HISTORY_ROLLS,
+  MAX_ROLL_CONCURRENCY,
   POLL_MS,
   SESSION_COOLDOWN_MS,
 } from "./constants.ts";
@@ -12,18 +15,21 @@ import { readTranscriptDelta, sessionIdFromPath } from "./adapters.ts";
 import { Logger } from "./logger.ts";
 import { buildRollPrompt, callRollEngine } from "./roll.ts";
 import { StateStore } from "./state.ts";
-import { TreeRuntime } from "./tree.ts";
+import { sessionIdentity, sessionIsExcluded, TreeRuntime } from "./tree.ts";
 import type {
   EngineName,
   FilteredDelta,
+  HistoryImportItem,
   OffsetRecord,
   Provider,
   RollOutput,
   SessionRecord,
+  SourceKind,
+  TrailState,
   TranscriptMeta,
 } from "./types.ts";
-import { nowIso, sleep } from "./utils.ts";
-import { discoverProviderSources, type ProviderSource, type SourceKind } from "./providers.ts";
+import { canonicalMainline, nowIso, sleep } from "./utils.ts";
+import { discoverProviderSources, type ProviderSource } from "./providers.ts";
 
 export interface TranscriptFile {
   path: string;
@@ -43,30 +49,141 @@ export type RollFunction = (
 ) => Promise<RollOutput>;
 
 type Pending = { firstSeen: number; latestSize: number };
+type WorkItem = {
+  mode: "live" | "history";
+  source: TranscriptFile;
+  historyKey?: string;
+  historyJobId?: string;
+};
 
-export function discoverTranscripts(
+export interface IntakeRangePreview {
+  days: number;
+  cutoffAt: string;
+  sessions: number;
+  bytes: number;
+}
+
+export interface IntakeView {
+  phase: "awaiting-choice" | "importing" | "complete";
+  coverageStartAt: string | null;
+  lastDiscoveryAt: string | null;
+  inventory: {
+    total: number;
+    providers: Partial<Record<Provider, number>>;
+    ranges: IntakeRangePreview[];
+    activity: Array<{ mtimeMs: number; size: number }>;
+  };
+  job: null | {
+    id: string;
+    status: "running" | "paused" | "complete" | "cancelled";
+    cutoffAt: string;
+    total: number;
+    completed: number;
+    failed: number;
+    active: number;
+    maxParallel: number;
+    current: null | { provider: Provider; sessionId: string; title: string; path: string; error?: string };
+  };
+}
+
+function sessionKey(source: Pick<TranscriptFile, "provider" | "sessionId" | "path">): string {
+  return sessionIdentity(source.provider, source.sessionId ?? sessionIdFromPath(source.path, source.provider));
+}
+
+function dedupeSources(files: ProviderSource[]): TranscriptFile[] {
+  files.sort((left, right) => right.mtimeMs - left.mtimeMs || right.size - left.size);
+  const logicalSessions = new Map<string, TranscriptFile>();
+  for (const file of files) {
+    const key = sessionKey(file);
+    if (!logicalSessions.has(key)) logicalSessions.set(key, file);
+  }
+  return [...logicalSessions.values()];
+}
+
+function rootFingerprint(state: TrailState, rootId: string | null): string {
+  if (!rootId || !state.nodes[rootId]) return "";
+  const ids: string[] = [];
+  const stack = [rootId];
+  const seen = new Set<string>();
+  while (stack.length) {
+    const id = stack.pop();
+    if (!id || seen.has(id) || !state.nodes[id]) continue;
+    seen.add(id);
+    ids.push(id);
+    stack.push(...state.nodes[id]!.children);
+  }
+  ids.sort();
+  const nodes = ids.map((id) => {
+    const node = state.nodes[id]!;
+    return [id, node.parent, node.type, node.label, node.state, node.note, node.blockedNote, node.children];
+  });
+  const sessions = Object.values(state.sessions)
+    .filter((session) => session.rootId === rootId)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .map((session) => [session.id, session.cursor, session.lastTranscriptAt, session.snapshot]);
+  return JSON.stringify([nodes, sessions]);
+}
+
+function directoryFingerprint(state: TrailState): string {
+  return JSON.stringify(state.roots.map((rootId) => {
+    const root = state.nodes[rootId];
+    const sessions = Object.values(state.sessions)
+      .filter((session) => session.rootId === rootId)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((session) => [session.id, session.cursor, session.lastTranscriptAt, session.snapshot.summary]);
+    return [rootId, root?.label, state.archived.includes(rootId), sessions];
+  }));
+}
+
+function candidateIsFresh(
+  base: TrailState,
+  current: TrailState,
+  sessionId: string,
+  output: RollOutput,
+): boolean {
+  const baseSource = base.sessions[sessionId]?.rootId ?? null;
+  const currentSource = current.sessions[sessionId]?.rootId ?? null;
+  if (baseSource !== currentSource || rootFingerprint(base, baseSource) !== rootFingerprint(current, currentSource)) {
+    return false;
+  }
+  const mainline = canonicalMainline(output.mainline);
+  if (!mainline) return true;
+  const baseTarget = base.mainlineIndex[mainline] ?? null;
+  const currentTarget = current.mainlineIndex[mainline] ?? null;
+  if (baseTarget) {
+    return baseTarget === currentTarget
+      && rootFingerprint(base, baseTarget) === rootFingerprint(current, currentTarget);
+  }
+  // Exact-name convergence is safe: a candidate that did not see this target can
+  // only grow from the root on an unattached/reattach round; TreeRuntime still
+  // rejects every stale or cross-mainline node reference.
+  if (currentTarget) return true;
+  return directoryFingerprint(base) === directoryFingerprint(current);
+}
+
+export function discoverAllTranscripts(
   home = homedir(),
   additionalCodexHomes: string[] = [
     process.env.CODEX_HOME ?? "",
     join(home, "Library", "Application Support", "orca", "codex-runtime-home", "home"),
   ],
 ): TranscriptFile[] {
-  const files: ProviderSource[] = discoverProviderSources(home, additionalCodexHomes);
-  files.sort((left, right) => right.mtimeMs - left.mtimeMs || right.size - left.size);
-  const logicalSessions = new Map<string, TranscriptFile>();
-  for (const file of files) {
-    const key = `${file.provider}:${file.sessionId ?? sessionIdFromPath(file.path, file.provider)}`;
-    if (!logicalSessions.has(key)) logicalSessions.set(key, file);
-  }
-  return [...logicalSessions.values()].slice(0, MAX_ACTIVE_SESSIONS);
+  return dedupeSources(discoverProviderSources(home, additionalCodexHomes));
+}
+
+export function discoverTranscripts(
+  home = homedir(),
+  additionalCodexHomes?: string[],
+): TranscriptFile[] {
+  return discoverAllTranscripts(home, additionalCodexHomes).slice(0, MAX_ACTIVE_SESSIONS);
 }
 
 function storedOffset(state: ReturnType<StateStore["snapshot"]>, source: TranscriptFile): OffsetRecord | undefined {
   const direct = state.offsets[source.path];
   if (direct) return direct;
-  const sessionId = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
+  const id = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
   return Object.values(state.offsets).find(
-    (record) => record.provider === source.provider && record.sessionId === sessionId,
+    (record) => record.provider === source.provider && record.sessionId === id,
   );
 }
 
@@ -104,9 +221,14 @@ function sessionFromMeta(meta: TranscriptMeta, existing?: SessionRecord): Sessio
 export class TranscriptWatcher {
   readonly #pending = new Map<string, Pending>();
   readonly #queued = new Set<string>();
-  readonly #queue: TranscriptFile[] = [];
+  readonly #queue: WorkItem[] = [];
+  readonly #activeSessions = new Set<string>();
+  #inventory: TranscriptFile[] = [];
   #timer: ReturnType<typeof setInterval> | null = null;
-  #working = false;
+  #activeWorkers = 0;
+  #activeHistory = 0;
+  #committing = 0;
+  #commitTail: Promise<void> = Promise.resolve();
   #stopped = false;
 
   constructor(
@@ -115,13 +237,13 @@ export class TranscriptWatcher {
     readonly rollDirectory: string,
     readonly logger = new Logger(),
     readonly roll: RollFunction = callRollEngine,
-    readonly discover: () => TranscriptFile[] = discoverTranscripts,
+    readonly discover: () => TranscriptFile[] = discoverAllTranscripts,
   ) {}
 
   start(): void {
     if (this.#timer) return;
     this.#stopped = false;
-    void this.poll();
+    void this.checkNow();
     this.#timer = setInterval(() => void this.poll(), POLL_MS);
   }
 
@@ -133,14 +255,216 @@ export class TranscriptWatcher {
 
   async once(): Promise<void> {
     await this.poll(true);
-    while (this.#working || this.#queue.length) await sleep(10);
+    while (this.#activeWorkers || this.#queue.length || this.#committing) await sleep(10);
   }
 
-  async poll(force = false): Promise<void> {
-    if (this.#stopped && !force) return;
-    const now = Date.now();
+  intakeView(now = Date.now()): IntakeView {
+    if (!this.#inventory.length) this.#inventory = this.discover();
     const state = this.store.snapshot();
-    for (const source of this.discover()) {
+    const visibleInventory = this.#inventory.filter((source) => !state.excludedSessions[sessionKey(source)]);
+    const eligible = visibleInventory.filter((source) => !state.intake.imported[sessionKey(source)]);
+    const providers: Partial<Record<Provider, number>> = {};
+    for (const source of visibleInventory) providers[source.provider] = (providers[source.provider] ?? 0) + 1;
+    const ranges = HISTORY_RANGE_DAYS.map((days) => {
+      const cutoff = now - days * 86_400_000;
+      const matches = eligible.filter((source) => source.mtimeMs >= cutoff);
+      return {
+        days,
+        cutoffAt: new Date(cutoff).toISOString(),
+        sessions: matches.length,
+        bytes: matches.reduce((sum, source) => sum + source.size, 0),
+      };
+    });
+    const job = state.intake.job;
+    const items = job ? Object.values(job.items) : [];
+    const currentItem = items.find((item) => item.status === "running")
+      ?? (job?.status === "paused" ? items.find((item) => item.status === "failed") : undefined)
+      ?? items.find((item) => item.status === "pending")
+      ?? items.find((item) => item.status === "failed")
+      ?? null;
+    const source = currentItem
+      ? this.#inventory.find((candidate) => sessionKey(candidate) === currentItem.key)
+      : undefined;
+    return {
+      phase: state.intake.phase,
+      coverageStartAt: state.intake.coverageStartAt,
+      lastDiscoveryAt: state.intake.lastDiscoveryAt,
+      inventory: {
+        total: visibleInventory.length,
+        providers,
+        ranges,
+        activity: eligible.map((source) => ({ mtimeMs: source.mtimeMs, size: source.size })),
+      },
+      job: job ? {
+        id: job.id,
+        status: job.status,
+        cutoffAt: job.cutoffAt,
+        total: items.length,
+        completed: items.filter((item) => item.status === "complete" || item.status === "skipped").length,
+        failed: items.filter((item) => item.status === "failed").length,
+        active: items.filter((item) => item.status === "running").length,
+        maxParallel: MAX_HISTORY_ROLLS,
+        current: currentItem ? {
+          provider: currentItem.provider,
+          sessionId: currentItem.sessionId,
+          title: source?.title || `${currentItem.provider}:${currentItem.sessionId.slice(0, 8)}`,
+          path: currentItem.path,
+          ...(currentItem.error ? { error: currentItem.error } : {}),
+        } : null,
+      } : null,
+    };
+  }
+
+  async checkNow(): Promise<IntakeView> {
+    this.#inventory = this.discover();
+    const checkedAt = nowIso();
+    await this.store.update((state) => { state.intake.lastDiscoveryAt = checkedAt; });
+    await this.poll(true, this.#inventory);
+    return this.intakeView();
+  }
+
+  async chooseHistory(cutoffAt: string | null): Promise<IntakeView> {
+    this.#inventory = this.discover();
+    const cutoffMs = cutoffAt === null ? null : Date.parse(cutoffAt);
+    if (cutoffAt !== null && !Number.isFinite(cutoffMs)) throw new Error("invalid history cutoff");
+    const selectedCutoff = cutoffAt;
+    const at = nowIso();
+    await this.store.update((state) => {
+      if (state.intake.job?.status === "running" || state.intake.job?.status === "paused") {
+        throw new Error("a history import is already active");
+      }
+      const firstChoice = state.intake.phase === "awaiting-choice";
+      for (const source of this.#inventory) {
+        const id = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
+        if (sessionIsExcluded(state, source.provider, id)) continue;
+        const existing = storedOffset(state, source);
+        if (!firstChoice && existing) continue;
+        for (const [key, record] of Object.entries(state.offsets)) {
+          if (key !== source.path && record.provider === source.provider && record.sessionId === id) delete state.offsets[key];
+        }
+        state.offsets[source.path] = {
+          path: source.path,
+          provider: source.provider,
+          sessionId: id,
+          offset: source.size,
+          mtimeMs: source.mtimeMs,
+          cooldownUntil: 0,
+        };
+      }
+      state.intake.lastDiscoveryAt = at;
+      if (cutoffMs === null) {
+        state.intake.phase = "complete";
+        state.intake.job = null;
+        return;
+      }
+      const selected = this.#inventory.filter((source) =>
+        source.mtimeMs >= (cutoffMs ?? Number.POSITIVE_INFINITY)
+        && !state.excludedSessions[sessionKey(source)]
+      );
+      const items: Record<string, HistoryImportItem> = {};
+      for (const source of selected) {
+        const key = sessionKey(source);
+        if (state.intake.imported[key]) continue;
+        const id = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
+        items[key] = {
+          key,
+          provider: source.provider,
+          sessionId: id,
+          path: source.path,
+          kind: source.kind ?? "append",
+          plannedSize: source.size,
+          plannedMtimeMs: source.mtimeMs,
+          cursor: 0,
+          status: "pending",
+          reconcile: Boolean(state.sessions[id]),
+        };
+      }
+      if (!Object.keys(items).length) {
+        state.intake.phase = "complete";
+        state.intake.coverageStartAt = earlierIso(state.intake.coverageStartAt, selectedCutoff!);
+        state.intake.job = null;
+        return;
+      }
+      state.intake.phase = "importing";
+      state.intake.job = {
+        id: crypto.randomUUID(),
+        createdAt: at,
+        cutoffAt: selectedCutoff!,
+        highWaterAt: at,
+        status: "running",
+        items,
+      };
+    });
+    await this.poll(true, this.#inventory);
+    return this.intakeView();
+  }
+
+  async pauseHistory(): Promise<IntakeView> {
+    let jobId = "";
+    await this.store.update((state) => {
+      if (!state.intake.job || state.intake.job.status !== "running") throw new Error("no running history import");
+      jobId = state.intake.job.id;
+      state.intake.job.status = "paused";
+      for (const item of Object.values(state.intake.job.items)) {
+        if (item.status === "running") item.status = "pending";
+      }
+    });
+    this.#dropQueuedHistory(jobId);
+    return this.intakeView();
+  }
+
+  async resumeHistory(): Promise<IntakeView> {
+    await this.store.update((state) => {
+      const job = state.intake.job;
+      if (!job || job.status !== "paused") throw new Error("no paused history import");
+      for (const item of Object.values(job.items)) {
+        if (item.status === "failed") {
+          item.status = "pending";
+          delete item.error;
+        }
+      }
+      job.status = "running";
+      state.intake.phase = "importing";
+    });
+    await this.poll(true);
+    return this.intakeView();
+  }
+
+  async cancelHistory(): Promise<IntakeView> {
+    let jobId = "";
+    await this.store.update((state) => {
+      const job = state.intake.job;
+      if (!job || job.status === "complete") throw new Error("no active history import");
+      jobId = job.id;
+      for (const item of Object.values(job.items)) {
+        if (item.status === "pending" || item.status === "running" || item.status === "failed") item.status = "skipped";
+      }
+      job.status = "cancelled";
+      state.intake.phase = "complete";
+    });
+    this.#dropQueuedHistory(jobId);
+    return this.intakeView();
+  }
+
+  async poll(force = false, discovered?: TranscriptFile[]): Promise<void> {
+    if (this.#stopped && !force) return;
+    this.#inventory = discovered ?? this.discover();
+    const state = this.store.snapshot();
+    if (state.intake.phase === "awaiting-choice") return;
+    this.#enqueueHistory(state);
+    const blocked = new Set(
+      state.intake.job?.status === "running"
+        ? Object.values(state.intake.job.items)
+          .filter((item) => item.status === "pending" || item.status === "running" || item.status === "failed")
+          .map((item) => item.key)
+        : [],
+    );
+    const now = Date.now();
+    const liveSources = this.#inventory
+      .filter((source) => !state.excludedSessions[sessionKey(source)])
+      .slice(0, MAX_ACTIVE_SESSIONS);
+    for (const source of liveSources) {
+      if (blocked.has(sessionKey(source))) continue;
       const stored = storedOffset(state, source);
       if (stored?.ignored) continue;
       const snapshotChanged = source.kind === "snapshot" && stored?.mtimeMs !== source.mtimeMs;
@@ -157,49 +481,151 @@ export class TranscriptWatcher {
       this.#pending.set(source.path, pending);
       const cooldownUntil = stored?.cooldownUntil ?? 0;
       const ready = force || source.kind === "snapshot" || available >= LINGER_BYTES || now - pending.firstSeen >= LINGER_MS;
-      if (ready && (force || now >= cooldownUntil)) this.#enqueue(source);
+      if (ready && (force || now >= cooldownUntil)) this.#enqueue({ mode: "live", source });
     }
   }
 
-  #enqueue(source: TranscriptFile): void {
-    if (this.#queued.has(source.path)) return;
-    this.#queued.add(source.path);
-    this.#queue.push(source);
-    void this.#drain();
+  #enqueueHistory(state: ReturnType<StateStore["snapshot"]>): void {
+    const job = state.intake.job;
+    if (!job || job.status !== "running") return;
+    const queuedHistory = this.#queue.filter((item) => item.mode === "history").length;
+    let capacity = Math.max(0, HISTORY_QUEUE_BUFFER - queuedHistory);
+    const items = Object.values(job.items)
+      .filter((candidate) => candidate.status === "pending" || candidate.status === "running")
+      .sort((left, right) => right.plannedMtimeMs - left.plannedMtimeMs);
+    for (const item of items) {
+      if (capacity <= 0) break;
+      const source = this.#inventory.find((candidate) => sessionKey(candidate) === item.key) ?? {
+        path: item.path,
+        provider: item.provider,
+        sessionId: item.sessionId,
+        kind: item.kind,
+        size: item.plannedSize,
+        mtimeMs: item.plannedMtimeMs,
+      };
+      if (this.#enqueue({ mode: "history", source, historyKey: item.key, historyJobId: job.id })) capacity -= 1;
+    }
   }
 
-  async #drain(): Promise<void> {
-    if (this.#working) return;
-    this.#working = true;
+  #workKey(item: WorkItem): string {
+    return item.mode === "history"
+      ? `history:${item.historyJobId ?? ""}:${item.historyKey ?? item.source.path}`
+      : `live:${item.source.path}`;
+  }
+
+  #enqueue(item: WorkItem): boolean {
+    const key = this.#workKey(item);
+    if (this.#queued.has(key)) return false;
+    this.#queued.add(key);
+    if (item.mode === "live") {
+      const firstHistory = this.#queue.findIndex((queued) => queued.mode === "history");
+      if (firstHistory >= 0) this.#queue.splice(firstHistory, 0, item);
+      else this.#queue.push(item);
+    } else this.#queue.push(item);
+    this.#drain();
+    return true;
+  }
+
+  #drain(): void {
+    while (this.#activeWorkers < MAX_ROLL_CONCURRENCY) {
+      const index = this.#queue.findIndex((item) => {
+        if (this.#activeSessions.has(sessionKey(item.source))) return false;
+        return item.mode === "live" || this.#activeHistory < MAX_HISTORY_ROLLS;
+      });
+      if (index < 0) return;
+      const [item] = this.#queue.splice(index, 1);
+      if (!item) return;
+      const logicalKey = sessionKey(item.source);
+      this.#activeWorkers += 1;
+      if (item.mode === "history") this.#activeHistory += 1;
+      this.#activeSessions.add(logicalKey);
+      void this.#run(item, logicalKey);
+    }
+  }
+
+  async #run(item: WorkItem, logicalKey: string): Promise<void> {
+    const key = this.#workKey(item);
+    const startedAt = Date.now();
     try {
-      while (this.#queue.length) {
-        const source = this.#queue.shift();
-        if (!source) continue;
-        try {
-          await this.#process(source);
-        } catch (error) {
-          this.logger.error("transcript roll failed", { path: source.path, error: String(error) }, source.path);
-          await this.#setRetryCooldown(source);
-        } finally {
-          this.#queued.delete(source.path);
-          this.#pending.delete(source.path);
-        }
-      }
+      if (item.mode === "history" && item.historyKey && item.historyJobId) {
+        await this.#processHistory(item.source, item.historyKey, item.historyJobId);
+      } else await this.#processLive(item.source);
+    } catch (error) {
+      this.logger.error("transcript roll failed", {
+        provider: item.source.provider,
+        sessionId: item.source.sessionId ?? sessionIdFromPath(item.source.path, item.source.provider),
+        mode: item.mode,
+        durationMs: Date.now() - startedAt,
+        error: String(error),
+      }, logicalKey);
+      if (item.mode === "history" && item.historyKey && item.historyJobId) {
+        await this.#setHistoryFailure(item.historyKey, item.historyJobId, error);
+        this.#dropQueuedHistory(item.historyJobId);
+      } else await this.#setRetryCooldown(item.source);
     } finally {
-      this.#working = false;
+      this.#queued.delete(key);
+      this.#pending.delete(item.source.path);
+      this.#activeSessions.delete(logicalKey);
+      this.#activeWorkers -= 1;
+      if (item.mode === "history") this.#activeHistory -= 1;
+      await this.poll(false);
+      this.#drain();
     }
   }
 
-  async #process(source: TranscriptFile): Promise<void> {
+  #dropQueuedHistory(jobId: string): void {
+    const job = this.store.snapshot().intake.job;
+    if (job?.id === jobId && job.status === "running") return;
+    for (let index = this.#queue.length - 1; index >= 0; index -= 1) {
+      const item = this.#queue[index];
+      if (item?.mode !== "history" || item.historyJobId !== jobId) continue;
+      this.#queued.delete(this.#workKey(item));
+      this.#queue.splice(index, 1);
+    }
+  }
+
+  async #serializeCommit<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.#commitTail;
+    let release!: () => void;
+    this.#commitTail = new Promise<void>((resolve) => { release = resolve; });
+    this.#committing += 1;
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      this.#committing -= 1;
+      release();
+    }
+  }
+
+  async #invokeRoll(
+    engine: EngineName,
+    prompt: string,
+    source: TranscriptFile,
+    mode: "live" | "history",
+    attempt: "initial" | "stale-retry",
+  ): Promise<RollOutput> {
+    const startedAt = Date.now();
+    const fields = {
+      engine,
+      mode,
+      attempt,
+      provider: source.provider,
+      sessionId: source.sessionId ?? sessionIdFromPath(source.path, source.provider),
+    };
+    if (this.logger.path) this.logger.info("roll invocation started", fields);
+    const output = await this.roll(engine, prompt, this.rollDirectory);
+    if (this.logger.path) this.logger.info("roll invocation completed", {
+      ...fields,
+      durationMs: Date.now() - startedAt,
+    });
+    return output;
+  }
+
+  async #processLive(source: TranscriptFile): Promise<void> {
     const before = this.store.snapshot();
     const offset = storedOffset(before, source);
-    const initialOffset = source.kind === "snapshot"
-      ? 0
-      : offset && offset.offset <= source.size
-      ? offset.offset
-      : source.size > MAX_READ_BYTES
-        ? source.size - MAX_READ_BYTES
-        : 0;
+    const initialOffset = source.kind === "snapshot" ? 0 : offset?.offset ?? 0;
     const delta = readTranscriptDelta(source.path, source.provider, {
       offset: initialOffset,
       mtimeMs: source.mtimeMs,
@@ -211,56 +637,165 @@ export class TranscriptWatcher {
     });
     if (delta.nextOffset <= initialOffset && delta.bytesRead > 0) return;
     if (delta.selfGenerated) {
-      await this.#commitConsumption(delta, true);
-      this.logger.info("ignored self-generated roll session", { sessionId: delta.meta.sessionId });
+      await this.#serializeCommit(() => this.#commitLive(delta, true));
       return;
     }
     if (delta.lowSignal || !delta.text) {
-      await this.#commitConsumption(delta, false);
+      await this.#serializeCommit(() => this.#commitLive(delta, false));
       return;
     }
-
-    const current = this.store.snapshot();
-    const session = current.sessions[delta.meta.sessionId];
-    const prompt = buildRollPrompt(current, session, delta.text);
-    const output = await this.roll(current.engine, prompt, this.rollDirectory);
-
-    // Deliberate at-most-once boundary: source progress is durable before non-idempotent grow ops.
-    await this.#commitConsumption(delta, false);
-    const applied = await this.runtime.applyRoll(delta.meta, output);
-    if (applied.rejected.length) {
-      this.logger.warn("runtime rejected roll operations", {
-        sessionId: delta.meta.sessionId,
-        rejected: applied.rejected,
-      });
-    }
+    const base = this.store.snapshot();
+    const output = await this.#invokeRoll(
+      base.engine,
+      buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text),
+      source,
+      "live",
+      "initial",
+    );
+    await this.#serializeCommit(async () => {
+      const currentOffset = storedOffset(this.store.snapshot(), source);
+      if ((currentOffset?.offset ?? 0) !== initialOffset) return;
+      const current = this.store.snapshot();
+      const resolved = candidateIsFresh(base, current, delta.meta.sessionId, output)
+        ? output
+        : await this.#invokeRoll(
+          current.engine,
+          buildRollPrompt(current, current.sessions[delta.meta.sessionId], delta.text),
+          source,
+          "live",
+          "stale-retry",
+        );
+      await this.#commitLive(delta, false);
+      await this.#apply(delta.meta, resolved);
+    });
   }
 
-  async #commitConsumption(delta: FilteredDelta, ignored: boolean): Promise<void> {
-    await this.store.update((state) => {
-      const record: OffsetRecord = {
-        path: delta.meta.path,
-        provider: delta.meta.provider,
-        sessionId: delta.meta.sessionId,
-        offset: delta.nextOffset,
-        mtimeMs: delta.meta.mtimeMs,
-        cooldownUntil: Date.now() + SESSION_COOLDOWN_MS,
-      };
-      if (delta.skipUntilNewline) record.skipUntilNewline = true;
-      if (ignored) record.ignored = true;
-      for (const [key, existing] of Object.entries(state.offsets)) {
-        if (
-          key !== delta.meta.path
-          && existing.provider === delta.meta.provider
-          && existing.sessionId === delta.meta.sessionId
-        ) delete state.offsets[key];
-      }
-      state.offsets[delta.meta.path] = record;
-      if (!ignored) {
-        state.sessions[delta.meta.sessionId] = sessionFromMeta(
-          delta.meta,
-          state.sessions[delta.meta.sessionId],
+  async #processHistory(source: TranscriptFile, historyKey: string, historyJobId: string): Promise<void> {
+    const before = this.store.snapshot();
+    const job = before.intake.job;
+    const item = job?.items[historyKey];
+    if (!job || job.id !== historyJobId || job.status !== "running" || !item || (item.status !== "pending" && item.status !== "running")) return;
+    const claimed = await this.store.update((state) => {
+      const currentJob = state.intake.job;
+      const current = currentJob?.items[historyKey];
+      if (!currentJob || currentJob.id !== historyJobId || currentJob.status !== "running" || !current) return false;
+      if (current.status === "pending") current.status = "running";
+      return current.status === "running" && current.cursor === item.cursor;
+    });
+    if (!claimed) return;
+    const delta = readTranscriptDelta(source.path, source.provider, {
+      offset: item.kind === "snapshot" ? 0 : item.cursor,
+      ...(item.kind === "append" ? { endOffset: item.plannedSize } : {}),
+      ...(item.kind === "append" ? { includeFinalLine: true } : {}),
+      mtimeMs: source.mtimeMs,
+      kind: item.kind,
+      sessionId: item.sessionId,
+      ...(source.cwd ? { cwd: source.cwd } : {}),
+      ...(source.title ? { title: source.title } : {}),
+      ...(item.skipUntilNewline && item.cursor > 0 ? { skipUntilNewline: true } : {}),
+    });
+    if (delta.selfGenerated) {
+      await this.#serializeCommit(async () => {
+        const committed = await this.#commitHistory(historyKey, historyJobId, item.cursor, delta, "skipped");
+        if (committed) await this.#markLiveIgnored(delta);
+      });
+      return;
+    }
+    if (delta.lowSignal || !delta.text) {
+      await this.#serializeCommit(() => this.#commitHistory(historyKey, historyJobId, item.cursor, delta));
+      return;
+    }
+    const base = this.store.snapshot();
+    const prompt = buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
+      historical: true,
+      reconcile: item.reconcile,
+    });
+    const output = await this.#invokeRoll(base.engine, prompt, source, "history", "initial");
+    await this.#serializeCommit(async () => {
+      const current = this.store.snapshot();
+      const currentJob = current.intake.job;
+      const currentItem = currentJob?.items[historyKey];
+      if (!currentJob || currentJob.id !== historyJobId || currentJob.status !== "running"
+        || currentItem?.status !== "running" || currentItem.cursor !== item.cursor) return;
+      const resolved = candidateIsFresh(base, current, delta.meta.sessionId, output)
+        ? output
+        : await this.#invokeRoll(
+          current.engine,
+          buildRollPrompt(current, current.sessions[delta.meta.sessionId], delta.text, {
+            historical: true,
+            reconcile: currentItem.reconcile,
+          }),
+          source,
+          "history",
+          "stale-retry",
         );
+      const committed = await this.#commitHistory(historyKey, historyJobId, item.cursor, delta);
+      if (committed) await this.#apply(delta.meta, resolved);
+    });
+  }
+
+  async #apply(meta: TranscriptMeta, output: RollOutput): Promise<void> {
+    const applied = await this.runtime.applyRoll(meta, output);
+    if (applied.rejected.length) this.logger.warn("runtime rejected roll operations", { sessionId: meta.sessionId, rejected: applied.rejected });
+  }
+
+  async #commitLive(delta: FilteredDelta, ignored: boolean): Promise<void> {
+    await this.store.update((state) => {
+      if (sessionIsExcluded(state, delta.meta.provider, delta.meta.sessionId)) return;
+      writeOffset(state, delta, ignored);
+      if (!ignored) state.sessions[delta.meta.sessionId] = sessionFromMeta(delta.meta, state.sessions[delta.meta.sessionId]);
+    });
+  }
+
+  async #commitHistory(
+    historyKey: string,
+    historyJobId: string,
+    expectedCursor: number,
+    delta: FilteredDelta,
+    forcedStatus?: "skipped",
+  ): Promise<boolean> {
+    return await this.store.update((state) => {
+      if (sessionIsExcluded(state, delta.meta.provider, delta.meta.sessionId)) return false;
+      const job = state.intake.job;
+      const item = job?.items[historyKey];
+      if (!job || job.id !== historyJobId || job.status !== "running" || !item
+        || item.status !== "running" || item.cursor !== expectedCursor) return false;
+      item.cursor = item.kind === "snapshot" ? item.plannedSize : Math.min(item.plannedSize, delta.nextOffset);
+      if (delta.skipUntilNewline) item.skipUntilNewline = true;
+      else delete item.skipUntilNewline;
+      if (item.kind === "snapshot") writeOffset(state, delta, false);
+      const complete = forcedStatus === "skipped" || item.kind === "snapshot" || item.cursor >= item.plannedSize;
+      item.status = forcedStatus ?? (complete ? "complete" : "pending");
+      delete item.error;
+      if (forcedStatus !== "skipped") state.sessions[delta.meta.sessionId] = sessionFromMeta(delta.meta, state.sessions[delta.meta.sessionId]);
+      if (complete) state.intake.imported[historyKey] = nowIso();
+      const pending = Object.values(job.items).some((candidate) => candidate.status === "pending" || candidate.status === "running" || candidate.status === "failed");
+      if (!pending) {
+        job.status = "complete";
+        state.intake.phase = "complete";
+        state.intake.coverageStartAt = earlierIso(state.intake.coverageStartAt, job.cutoffAt);
+      }
+      return true;
+    });
+  }
+
+  async #markLiveIgnored(delta: FilteredDelta): Promise<void> {
+    await this.store.update((state) => {
+      if (!sessionIsExcluded(state, delta.meta.provider, delta.meta.sessionId)) writeOffset(state, delta, true);
+    });
+  }
+
+  async #setHistoryFailure(historyKey: string, historyJobId: string, error: unknown): Promise<void> {
+    await this.store.update((state) => {
+      const job = state.intake.job;
+      const item = job?.items[historyKey];
+      if (!job || job.id !== historyJobId || job.status !== "running" || !item
+        || item.status === "complete" || item.status === "skipped") return;
+      item.status = "failed";
+      item.error = String(error).slice(0, 400);
+      job.status = "paused";
+      for (const candidate of Object.values(job.items)) {
+        if (candidate !== item && candidate.status === "running") candidate.status = "pending";
       }
     });
   }
@@ -268,16 +803,15 @@ export class TranscriptWatcher {
   async #setRetryCooldown(source: TranscriptFile): Promise<void> {
     await this.store.update((state) => {
       const existing = storedOffset(state, source);
-      const sessionId = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
+      const id = source.sessionId ?? sessionIdFromPath(source.path, source.provider);
+      if (sessionIsExcluded(state, source.provider, id)) return;
       for (const [key, record] of Object.entries(state.offsets)) {
-        if (key !== source.path && record.provider === source.provider && record.sessionId === sessionId) {
-          delete state.offsets[key];
-        }
+        if (key !== source.path && record.provider === source.provider && record.sessionId === id) delete state.offsets[key];
       }
       state.offsets[source.path] = {
         path: source.path,
         provider: source.provider,
-        sessionId: existing?.sessionId ?? sessionId,
+        sessionId: existing?.sessionId ?? id,
         offset: existing?.offset ?? 0,
         mtimeMs: source.mtimeMs,
         cooldownUntil: Date.now() + SESSION_COOLDOWN_MS,
@@ -286,4 +820,25 @@ export class TranscriptWatcher {
       };
     });
   }
+}
+
+function earlierIso(current: string | null, candidate: string): string {
+  return current && Date.parse(current) <= Date.parse(candidate) ? current : candidate;
+}
+
+function writeOffset(state: ReturnType<StateStore["snapshot"]>, delta: FilteredDelta, ignored: boolean): void {
+  const record: OffsetRecord = {
+    path: delta.meta.path,
+    provider: delta.meta.provider,
+    sessionId: delta.meta.sessionId,
+    offset: delta.nextOffset,
+    mtimeMs: delta.meta.mtimeMs,
+    cooldownUntil: Date.now() + SESSION_COOLDOWN_MS,
+  };
+  if (delta.skipUntilNewline) record.skipUntilNewline = true;
+  if (ignored) record.ignored = true;
+  for (const [key, existing] of Object.entries(state.offsets)) {
+    if (key !== delta.meta.path && existing.provider === delta.meta.provider && existing.sessionId === delta.meta.sessionId) delete state.offsets[key];
+  }
+  state.offsets[delta.meta.path] = record;
 }

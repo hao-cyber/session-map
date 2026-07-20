@@ -3,21 +3,26 @@
 
   const POLL_MS = 4_000;
   const DRAG_THRESHOLD = 5;
-  const SESSION_CLICK_DELAY_MS = 350;
   const openTicketKey = "sessionmap.open-ticket.v1";
   const openIdKey = "sessionmap.open-id.v1";
   const openExpiryKey = "sessionmap.open-expiry.v1";
   const manualFoldKey = "sessionmap.manual-fold.v1";
   const legacyManualFoldKey = "maintrail.manual-fold.v1";
+  const topicFoldKey = "sessionmap.topic-fold.v1";
 
   const mapShell = document.getElementById("map-shell");
   const directory = document.getElementById("directory");
+  const attentionIndexList = document.getElementById("attention-index-list");
+  const attentionIndexCount = document.getElementById("attention-index-count");
+  const topicIndexList = document.getElementById("topic-index-list");
+  const topicIndexCount = document.getElementById("topic-index-count");
   const loading = document.getElementById("loading");
-  const nowBar = document.getElementById("now-bar");
   const statusLine = document.getElementById("status-line");
+  const checkNowButton = document.getElementById("check-now-button");
   const gitChips = document.getElementById("git-chips");
   const engineSelect = document.getElementById("engine-select");
   const archivedButton = document.getElementById("archived-button");
+  const historyButton = document.getElementById("history-button");
   const archivedCount = document.getElementById("archived-count");
   const archiveDrawer = document.getElementById("archive-drawer");
   const archiveList = document.getElementById("archive-list");
@@ -26,6 +31,30 @@
   const sayInput = document.getElementById("say-input");
   const sayLabel = document.getElementById("say-label");
   const toastRegion = document.getElementById("toast-region");
+  const intakePanel = document.getElementById("intake-panel");
+  const intakeChoice = document.getElementById("intake-choice");
+  const intakeProgress = document.getElementById("intake-progress");
+  const intakeDiscoveryState = document.getElementById("intake-discovery-state");
+  const intakeProviderSummary = document.getElementById("intake-provider-summary");
+  const intakeRanges = document.getElementById("intake-ranges");
+  const intakeCustom = document.getElementById("intake-custom");
+  const intakeCustomDate = document.getElementById("intake-custom-date");
+  const intakeSessionCount = document.getElementById("intake-session-count");
+  const intakeSizeEstimate = document.getElementById("intake-size-estimate");
+  const intakeStart = document.getElementById("intake-start");
+  const intakeSkip = document.getElementById("intake-skip");
+  const intakeRecheck = document.getElementById("intake-recheck");
+  const intakeEngineNote = document.getElementById("intake-engine-note");
+  const intakeProgressTitle = document.getElementById("intake-progress-title");
+  const intakeProgressCopy = document.getElementById("intake-progress-copy");
+  const intakeJobState = document.getElementById("intake-job-state");
+  const intakeProgressFill = document.getElementById("intake-progress-fill");
+  const intakeProgressCount = document.getElementById("intake-progress-count");
+  const intakeCurrent = document.getElementById("intake-current");
+  const intakePause = document.getElementById("intake-pause");
+  const intakeResume = document.getElementById("intake-resume");
+  const intakeCancel = document.getElementById("intake-cancel");
+  const intakeShowMap = document.getElementById("intake-show-map");
 
   let transformer;
   let snapshot;
@@ -35,9 +64,15 @@
   let saySessionId = "";
   let suppressHash = false;
   let manualFold = loadManualFold();
-  const overviewMaps = new Map();
-  const pendingSessionClicks = new Map();
+  let topicFold = loadTopicFold();
   const pendingJumps = new Set();
+  let topicIndexFrame = 0;
+  let intakeSelection = "30";
+  let intakeSelectionTouched = false;
+  let intakePanelOpen = false;
+  let hiddenImportId = "";
+  let intakeBusy = false;
+  let previousJobStatus = "";
 
   function loadManualFold() {
     try {
@@ -61,6 +96,23 @@
     }
   }
 
+  function loadTopicFold() {
+    try {
+      const value = JSON.parse(localStorage.getItem(topicFoldKey) || "{}");
+      return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveTopicFold() {
+    try {
+      localStorage.setItem(topicFoldKey, JSON.stringify(topicFold));
+    } catch {
+      // Local storage can be disabled. The map remains usable for this page life.
+    }
+  }
+
   function relativeTime(value) {
     const then = Date.parse(value);
     if (!Number.isFinite(then)) return "刚刚";
@@ -69,6 +121,20 @@
     if (seconds < 3600) return `${Math.floor(seconds / 60)} 分钟前`;
     if (seconds < 86_400) return `${Math.floor(seconds / 3600)} 小时前`;
     return `${Math.floor(seconds / 86_400)} 天前`;
+  }
+
+  function formatBytes(value) {
+    if (!Number.isFinite(value) || value <= 0) return "0 KB";
+    if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`;
+    return `${(value / 1024 / 1024).toFixed(value < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  }
+
+  function historyEstimate(sessions) {
+    if (!sessions) return "无需模型调用";
+    if (sessions > 60) return "任务较大 · 建议缩短范围";
+    const low = Math.max(1, Math.ceil(sessions / 3));
+    const high = Math.max(low + 1, Math.ceil(sessions * 0.75));
+    return `约 ${low}–${high} 分钟`;
   }
 
   async function api(path, init = {}) {
@@ -177,33 +243,10 @@
     return node;
   }
 
-  function extractNodeId(data) {
-    const content = data?.content || data?.payload?.content || "";
-    const match = String(content).match(/data-node-id=["']([^"']+)["']/);
-    return match?.[1] || null;
-  }
-
   function walk(node, visit, depth = 0) {
     if (!node) return;
     visit(node, depth);
     for (const child of node.children || []) walk(child, visit, depth + 1);
-  }
-
-  function applyManualFolds(root) {
-    walk(root, (node, depth) => {
-      const id = extractNodeId(node);
-      if (!id) return;
-      if (Object.prototype.hasOwnProperty.call(manualFold, id)) {
-        node.payload = node.payload || {};
-        node.payload.fold = Boolean(manualFold[id]);
-        return;
-      }
-      const content = String(node.content || node.payload?.content || "");
-      if (depth >= 2 && content.includes('data-default-fold="true"')) {
-        node.payload = node.payload || {};
-        node.payload.fold = true;
-      }
-    });
   }
 
   function contentElement(data) {
@@ -239,64 +282,15 @@
     mapShell.scrollTop += row.getBoundingClientRect().top - anchor.y;
   }
 
-  function afterLayout() {
-    return new Promise((resolve) => window.setTimeout(resolve, 350));
-  }
-
-  function markmapOptions() {
-    return {
-        autoFit: false,
-        color: () => "#aab2be",
-        duration: 240,
-        embedGlobalCSS: true,
-        fitRatio: 0.9,
-        initialExpandLevel: -1,
-        lineWidth: () => 1.25,
-        maxInitialScale: 1.25,
-        maxWidth: 520,
-        nodeMinHeight: 24,
-        paddingX: 12,
-        pan: true,
-        scrollForPan: false,
-        spacingHorizontal: 74,
-        spacingVertical: 7,
-        toggleRecursively: false,
-        zoom: true,
-      };
-  }
-
   function decorateRows(scope = directory) {
     for (const row of scope.querySelectorAll(".fm-line")) {
       const action = row.dataset.action;
-      if (action === "jump" || action === "toggle" || action === "session") {
+      if (action === "jump" || action === "toggle" || action === "fold-topic") {
         row.setAttribute("role", "button");
         row.setAttribute("tabindex", "0");
       }
     }
     for (const sessionId of pendingJumps) setJumpPending(sessionId, true);
-  }
-
-  function syncDisclosureControl(row, expanded) {
-    const control = row.querySelector('[data-inline-action="toggle-context"]');
-    if (!control) return;
-    control.textContent = expanded ? "收起" : "脉络";
-    control.setAttribute("aria-expanded", String(expanded));
-    control.setAttribute("aria-label", `${expanded ? "收起" : "展开"} session 脉络`);
-  }
-
-  async function mountOverview(container, data, id) {
-    if (overviewMaps.has(id)) return overviewMaps.get(id);
-    data.payload = data.payload || {};
-    data.payload.fold = false;
-    const svg = container.querySelector("svg");
-    const map = window.markmap.Markmap.create(svg, markmapOptions());
-    await map.setData(data);
-    overviewMaps.set(id, map);
-    decorateRows(svg);
-    bindOverviewEvents(svg, map);
-    await afterLayout();
-    await map.fit(1.08);
-    return map;
   }
 
   function buildSession(data) {
@@ -306,19 +300,6 @@
     entry.className = "session-entry";
     entry.dataset.nodeId = row.dataset.nodeId || "";
     entry.append(row);
-    const trail = document.createElement("div");
-    trail.className = "session-trail";
-    trail.setAttribute("role", "group");
-    for (const child of data.children || []) {
-      const item = contentElement(child);
-      if (item) trail.append(item);
-    }
-    const folded = Object.prototype.hasOwnProperty.call(manualFold, row.dataset.nodeId)
-      ? Boolean(manualFold[row.dataset.nodeId])
-      : true;
-    trail.hidden = folded;
-    syncDisclosureControl(row, !folded);
-    if (trail.childElementCount) entry.append(trail);
     return entry;
   }
 
@@ -329,30 +310,69 @@
     block.className = "topic-overview";
     block.dataset.nodeId = row.dataset.nodeId || "";
     block._overviewData = data;
-    const canvas = document.createElement("div");
-    canvas.className = "overview-canvas";
-    canvas.hidden = true;
-    const fit = document.createElement("button");
-    fit.type = "button";
-    fit.className = "overview-fit";
-    fit.textContent = "适合视图";
-    const svg = document.createElementNS("http:" + "//www.w3.org/2000/svg", "svg");
-    svg.setAttribute("role", "tree");
-    svg.setAttribute("aria-label", "主题完整思考树");
-    canvas.append(fit, svg);
+    const outline = document.createElement("div");
+    outline.className = "outline";
+    outline.setAttribute("role", "tree");
+    outline.setAttribute("aria-label", "主题完整脉络");
     const folded = Object.prototype.hasOwnProperty.call(manualFold, row.dataset.nodeId)
       ? Boolean(manualFold[row.dataset.nodeId])
       : true;
     row.setAttribute("aria-expanded", String(!folded));
-    canvas.hidden = folded;
-    block.append(row, canvas);
-    fit.addEventListener("click", async (event) => {
-      event.stopPropagation();
-      const map = await mountOverview(canvas, data, row.dataset.nodeId);
-      await map.fit(1.08);
-    });
-    if (!folded) void mountOverview(canvas, data, row.dataset.nodeId);
+    const label = row.querySelector(".thought-kicker");
+    if (label) label.textContent = folded ? "脉络" : "收起脉络";
+    outline.hidden = folded;
+    block.hidden = folded;
+    block.append(row, outline);
+    if (!folded) buildOutline(outline, data);
     return block;
+  }
+
+  function outlineHasCurrent(data) {
+    let found = false;
+    walk(data, (descendant) => {
+      if (found) return;
+      const element = contentElement(descendant);
+      if (!element) return;
+      if (element.classList.contains("node-active") && element.classList.contains("fm-node")) found = true;
+      else if (element.classList.contains("cursor")) found = true;
+    });
+    return found;
+  }
+
+  function outlineDefaultFold(data) {
+    return !outlineHasCurrent(data);
+  }
+
+  function buildOutlineNode(data) {
+    const wrap = document.createElement("div");
+    wrap.className = "outline-node";
+    if (outlineHasCurrent(data)) wrap.classList.add("is-current-path");
+    const row = contentElement(data);
+    if (!row) return wrap;
+    wrap.append(row);
+    const children = data.children || [];
+    if (!children.length) return wrap;
+    row.dataset.hasChildren = "true";
+    const id = row.dataset.nodeId;
+    const folded = id && Object.prototype.hasOwnProperty.call(manualFold, id)
+      ? Boolean(manualFold[id])
+      : outlineDefaultFold(data);
+    const list = document.createElement("div");
+    list.className = "outline-children";
+    list.hidden = folded;
+    row.setAttribute("aria-expanded", String(!folded));
+    row.setAttribute("role", "treeitem");
+    for (const child of children) list.append(buildOutlineNode(child));
+    wrap.append(list);
+    return wrap;
+  }
+
+  function buildOutline(container, topic) {
+    container.replaceChildren();
+    const list = document.createElement("div");
+    list.className = "outline-children";
+    for (const child of topic.children || []) list.append(buildOutlineNode(child));
+    container.append(list);
   }
 
   function buildTopic(data) {
@@ -363,24 +383,172 @@
     section.dataset.nodeId = headerRow.dataset.nodeId || "";
     const header = document.createElement("header");
     header.className = "topic-header";
-    header.append(headerRow);
+    const headerLayout = document.createElement("div");
+    headerLayout.className = "topic-header-layout";
+    const fold = document.createElement("button");
+    fold.type = "button";
+    fold.className = "topic-fold";
+    fold.dataset.inlineAction = "fold-topic";
+    fold.setAttribute("aria-label", "折叠或展开 Sessions");
+    const foldIcon = document.createElement("span");
+    foldIcon.className = "icon icon-chevron-down";
+    foldIcon.setAttribute("aria-hidden", "true");
+    fold.append(foldIcon);
+    headerRow.prepend(fold);
+    const foldCount = document.createElement("span");
+    foldCount.className = "topic-fold-count";
+    const mainlineLabel = headerRow.querySelector(".mainline-label");
+    if (mainlineLabel) mainlineLabel.after(foldCount);
+    headerLayout.append(headerRow);
+    header.append(headerLayout);
     const body = document.createElement("div");
     body.className = "topic-body";
+    let overview = null;
+    const sessions = document.createElement("section");
+    sessions.className = "session-list";
+    const sessionHead = document.createElement("div");
+    sessionHead.className = "session-list-head";
+    const sessionLabel = document.createElement("span");
+    sessionLabel.textContent = "Sessions";
+    const sessionCount = document.createElement("span");
+    sessionCount.className = "session-list-count";
+    sessionHead.append(sessionLabel, sessionCount);
+    sessions.append(sessionHead);
     for (const child of data.children || []) {
       const preview = contentElement(child);
       const kind = preview?.dataset.kind;
       const element = kind === "session" ? buildSession(child) : kind === "thoughts" ? buildOverview(child) : null;
-      if (element) body.append(element);
+      if (kind === "thoughts" && element) overview = element;
+      else if (kind === "session" && element) sessions.append(element);
     }
+    const sessionTotal = sessions.querySelectorAll(":scope > .session-entry").length;
+    sessionCount.textContent = String(sessionTotal);
+    foldCount.textContent = `· ${sessionTotal} 个 session`;
+    if (overview) {
+      const lineageAction = overview.querySelector(":scope > .thought-summary");
+      if (lineageAction) {
+        lineageAction.classList.add("topic-lineage-action");
+        headerLayout.append(lineageAction);
+      }
+      body.append(overview);
+    }
+    if (sessions.querySelector(".session-entry")) body.append(sessions);
+    const topicFolded = Boolean(topicFold[section.dataset.nodeId]);
+    section.classList.toggle("is-folded", topicFolded);
+    sessions.hidden = topicFolded;
+    fold.setAttribute("aria-expanded", String(!topicFolded));
     section.append(header, body);
     return section;
+  }
+
+  function toggleTopicFold(section) {
+    if (!section) return;
+    const sessions = section.querySelector(":scope > .topic-body > .session-list");
+    const foldButton = section.querySelector(":scope .topic-header .topic-fold");
+    const next = !section.classList.contains("is-folded");
+    section.classList.toggle("is-folded", next);
+    if (sessions) sessions.hidden = next;
+    if (foldButton) foldButton.setAttribute("aria-expanded", String(!next));
+    if (next) topicFold[section.dataset.nodeId] = true;
+    else delete topicFold[section.dataset.nodeId];
+    saveTopicFold();
+  }
+
+  function syncTopicIndexSelection() {
+    topicIndexFrame = 0;
+    const sections = [...directory.querySelectorAll(".topic-section")];
+    if (!sections.length) return;
+    const shellTop = mapShell.getBoundingClientRect().top;
+    let active = sections[0];
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= shellTop + 72) active = section;
+      else break;
+    }
+    for (const button of topicIndexList.querySelectorAll("button[data-node-id]")) {
+      const selected = button.dataset.nodeId === active?.dataset.nodeId;
+      button.classList.toggle("is-current", selected);
+      if (selected) button.setAttribute("aria-current", "location");
+      else button.removeAttribute("aria-current");
+    }
+  }
+
+  function scheduleTopicIndexSelection() {
+    if (topicIndexFrame) return;
+    topicIndexFrame = requestAnimationFrame(syncTopicIndexSelection);
+  }
+
+  function scrollToMainline(mainline) {
+    const section = [...directory.querySelectorAll(".topic-section")].find((candidate) =>
+      candidate.querySelector(".mainline-label")?.textContent?.trim() === mainline
+    );
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    section?.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "start" });
+  }
+
+  function renderTopicIndex() {
+    topicIndexList.replaceChildren();
+    const sections = [...directory.querySelectorAll(".topic-section")];
+    topicIndexCount.textContent = String(sections.length);
+    for (const section of sections) {
+      const row = section.querySelector(".fm-mainline");
+      const label = row?.querySelector(".mainline-label")?.textContent?.trim();
+      if (!row || !label) continue;
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.nodeId = section.dataset.nodeId || "";
+      button.className = [...row.classList].filter((name) => name.startsWith("state-")).join(" ");
+      const marker = document.createElement("span");
+      marker.className = "topic-index-marker";
+      marker.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span");
+      copy.className = "topic-index-copy";
+      copy.textContent = label;
+      const count = document.createElement("span");
+      count.className = "topic-index-sessions";
+      const sessionCount = section.querySelectorAll(".session-entry").length;
+      count.textContent = String(sessionCount);
+      count.hidden = sessionCount === 0;
+      button.append(marker, copy, count);
+      button.addEventListener("click", () => scrollToMainline(label));
+      topicIndexList.append(button);
+    }
+    syncTopicIndexSelection();
+  }
+
+  function renderSessionContexts(workspaces) {
+    const byCwd = new Map((workspaces || []).map((item) => [item.cwd, item]));
+    for (const row of directory.querySelectorAll(".fm-session[data-cwd]")) {
+      const git = byCwd.get(row.dataset.cwd || "");
+      const target = row.querySelector(".session-git-context");
+      if (!target) continue;
+      const cwd = row.querySelector(".session-cwd");
+      if (cwd) cwd.textContent = cwd.dataset.directoryLabel || "目录未知";
+      target.replaceChildren();
+      target.hidden = !git;
+      if (!git) continue;
+      if (cwd) {
+        const relative = row.dataset.cwd === git.worktree
+          ? "./"
+          : row.dataset.cwd.startsWith(`${git.worktree}/`)
+            ? row.dataset.cwd.slice(git.worktree.length + 1)
+            : cwd.textContent;
+        cwd.textContent = relative;
+      }
+      const worktree = document.createElement("span");
+      worktree.className = "session-worktree";
+      worktree.textContent = git.name;
+      worktree.title = `worktree · ${git.worktree}`;
+      const branch = document.createElement("span");
+      branch.className = "session-branch";
+      branch.textContent = git.branch || "detached";
+      branch.title = `Git 分支 · ${git.branch || "detached"}`;
+      target.append(worktree, branch);
+    }
   }
 
   async function renderMap(markdown) {
     const anchor = directoryAnchor();
     const transformed = transformer.transform(markdown);
-    applyManualFolds(transformed.root);
-    overviewMaps.clear();
     directory.replaceChildren();
     for (const topic of transformed.root.children || []) {
       const element = buildTopic(topic);
@@ -393,62 +561,199 @@
       directory.append(empty);
     }
     decorateRows();
+    renderTopicIndex();
     await new Promise((resolve) => requestAnimationFrame(resolve));
     pinDirectoryAnchor(anchor);
     loading.hidden = true;
   }
 
   function renderChrome(data) {
-    statusLine.textContent = `${data.activeSessions} 个活跃 session · 更新于 ${relativeTime(data.updatedAt)}`;
-    renderNow(data.now || []);
+    const job = data.intake?.job;
+    statusLine.textContent = job && (job.status === "running" || job.status === "paused")
+      ? `历史 ${job.completed}/${job.total} · ${job.status === "paused" ? "已暂停" : `${Math.max(1, job.active || 0)} 路整理中`}`
+      : `${data.activeSessions} 个活跃 session · 更新于 ${relativeTime(data.updatedAt)}`;
+    renderAttention(data.now || []);
     renderGit(data.git || []);
     renderEngines(data.engines || [], data.engine);
     renderArchives(data.archived || []);
+    renderIntake(data.intake, data.engine, data.engines || []);
   }
 
-  function renderNow(items) {
-    nowBar.replaceChildren();
-    if (!items.length) {
+  function selectedRange(intake) {
+    if (intakeSelection === "custom") {
+      const value = intakeCustomDate.value;
+      const cutoffAt = value ? new Date(`${value}T00:00:00`).toISOString() : new Date(Date.now() - 30 * 86_400_000).toISOString();
+      const cutoff = Date.parse(cutoffAt);
+      const activity = (intake.inventory.activity || []).filter((item) => item.mtimeMs >= cutoff);
+      return { cutoffAt, sessions: activity.length, bytes: activity.reduce((sum, item) => sum + item.size, 0) };
+    }
+    return intake.inventory.ranges.find((item) => String(item.days) === intakeSelection)
+      || intake.inventory.ranges.find((item) => item.days === 30)
+      || { cutoffAt: new Date(Date.now() - 30 * 86_400_000).toISOString(), sessions: 0, bytes: 0 };
+  }
+
+  function renderIntake(intake, engine, engines) {
+    if (!intake) return;
+    const job = intake.job;
+    if (previousJobStatus && previousJobStatus !== "complete" && job?.status === "complete") {
+      toast(`历史整理完成 · ${job.completed} 个 session`);
+    }
+    if (previousJobStatus === "running" && job?.status === "paused") {
+      toast("历史整理已暂停 · 可从“历史进度”继续");
+    }
+    previousJobStatus = job?.status || "";
+    historyButton.hidden = intake.phase === "awaiting-choice";
+    historyButton.textContent = intake.phase === "importing" ? "历史进度" : "补扫历史";
+    const showProgress = intake.phase === "importing" && job && hiddenImportId !== job.id;
+    const showChoice = intake.phase === "awaiting-choice" || (intake.phase === "complete" && intakePanelOpen);
+    intakePanel.hidden = !showChoice && !showProgress;
+    intakeChoice.hidden = !showChoice;
+    intakeProgress.hidden = !showProgress;
+    if (showChoice) renderIntakeChoice(intake, engine, engines);
+    if (showProgress) renderIntakeProgress(job);
+  }
+
+  function renderIntakeChoice(intake, engine, engines) {
+    const thirtyDay = intake.inventory.ranges?.find((item) => item.days === 30);
+    const recommendedDays = (thirtyDay?.sessions || 0) > 20 ? 7 : 30;
+    if (!intakeSelectionTouched) intakeSelection = String(recommendedDays);
+    intakeDiscoveryState.textContent = intake.lastDiscoveryAt ? `检查于 ${relativeTime(intake.lastDiscoveryAt)}` : "本机发现完成";
+    const providers = Object.entries(intake.inventory.providers || {}).filter(([, count]) => count > 0);
+    intakeProviderSummary.textContent = providers.length
+      ? `${providers.map(([provider, count]) => `${provider} ${count}`).join(" · ")} · 共 ${intake.inventory.total} 个 session`
+      : "没有发现可恢复的历史 session；可以直接从下一条对话开始";
+    intakeRanges.replaceChildren();
+    for (const range of intake.inventory.ranges || []) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "intake-range";
+      button.dataset.days = String(range.days);
+      button.setAttribute("aria-pressed", String(intakeSelection === String(range.days)));
+      const title = document.createElement("strong");
+      title.textContent = `最近 ${range.days} 天`;
+      const detail = document.createElement("span");
+      detail.textContent = `${range.sessions} 个 session${range.days === recommendedDays ? " · 推荐" : ""}`;
+      button.append(title, detail);
+      button.addEventListener("click", () => { intakeSelectionTouched = true; intakeSelection = String(range.days); renderIntakeChoice(intake, engine, engines); });
+      intakeRanges.append(button);
+    }
+    const custom = document.createElement("button");
+    custom.type = "button";
+    custom.className = "intake-range";
+    custom.dataset.days = "custom";
+    custom.setAttribute("aria-pressed", String(intakeSelection === "custom"));
+    const customTitle = document.createElement("strong");
+    customTitle.textContent = "自定义";
+    const customDetail = document.createElement("span");
+    customDetail.textContent = "选择回溯日期";
+    custom.append(customTitle, customDetail);
+    custom.addEventListener("click", () => { intakeSelectionTouched = true; intakeSelection = "custom"; renderIntakeChoice(intake, engine, engines); });
+    intakeRanges.append(custom);
+    intakeCustom.hidden = intakeSelection !== "custom";
+    if (!intakeCustomDate.value) {
+      const date = new Date(Date.now() - 90 * 86_400_000);
+      intakeCustomDate.value = date.toISOString().slice(0, 10);
+    }
+    const selected = selectedRange(intake);
+    intakeSessionCount.textContent = `${selected.sessions} 个 session`;
+    intakeSizeEstimate.textContent = `${historyEstimate(selected.sessions)} · ${formatBytes(selected.bytes)}`;
+    const availability = engines.find((item) => item.name === engine);
+    const engineReady = availability?.available === true;
+    intakeStart.textContent = selected.sessions
+      ? engineReady ? `开始整理 ${selected.sessions} 个 session` : "先选择可用 Roll 引擎"
+      : "进入空地图";
+    intakeStart.disabled = intakeBusy || (selected.sessions > 0 && !engineReady);
+    intakeSkip.disabled = intakeBusy;
+    intakeRecheck.disabled = intakeBusy;
+    const reasonLabels = {
+      checking: "正在检查",
+      "not-installed": "未安装",
+      "not-authenticated": "未登录",
+      "auth-check-failed": "状态检查失败",
+      "recent-failure": "最近调用失败，稍后重试",
+    };
+    intakeEngineNote.textContent = engineReady
+      ? `正文仅交给当前 Roll 引擎 ${engine}`
+      : `Roll 引擎 ${engine} ${reasonLabels[availability?.reason] || "不可用"}`;
+  }
+
+  function renderIntakeProgress(job) {
+    const paused = job.status === "paused";
+    intakeProgressTitle.textContent = paused ? "历史整理已暂停" : "正在把近期工作整理成地图";
+    intakeProgressCopy.textContent = job.failed
+      ? `${job.failed} 个 session 需要重试；已完成的工作线保持可用。`
+      : `完成的工作线会立即出现；后台最多 ${job.maxParallel || 2} 路并行，页面关闭后仍继续。`;
+    intakeJobState.textContent = paused ? "等待继续" : `${Math.max(1, job.active || 0)} 路并行`;
+    const percent = job.total ? Math.round(job.completed / job.total * 100) : 100;
+    intakeProgressFill.style.width = `${percent}%`;
+    intakeProgressCount.textContent = `${job.completed} / ${job.total}`;
+    intakeCurrent.replaceChildren();
+    if (job.current) {
+      const strong = document.createElement("strong");
+      strong.textContent = job.current.title;
+      const detail = document.createElement("span");
+      detail.textContent = job.current.error
+        ? `${job.current.provider} · ${job.current.error}`
+        : `${job.current.provider} · ${job.current.sessionId.slice(0, 12)}`;
+      intakeCurrent.append(strong, detail);
+    } else intakeCurrent.textContent = "正在收口导入状态…";
+    intakePause.hidden = paused;
+    intakeResume.hidden = !paused;
+  }
+
+  function renderAttention(items) {
+    const actionable = items.filter((item) => item.kind === "decision" || item.kind === "reply" || item.kind === "blocker");
+    attentionIndexCount.textContent = String(actionable.length);
+    attentionIndexList.replaceChildren();
+    if (!actionable.length) {
       const empty = document.createElement("div");
-      empty.className = "now-empty";
+      empty.className = "attention-empty";
       const icon = document.createElement("span");
       icon.className = "icon icon-check-circle-2";
       const text = document.createElement("span");
-      text.textContent = "没有等待你处理的工作线";
+      text.textContent = "暂时无需处理";
       empty.append(icon, text);
-      nowBar.append(empty);
+      attentionIndexList.append(empty);
       return;
     }
-    for (const item of items) {
+    for (const item of actionable) {
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "now-item";
+      button.className = "attention-item";
       button.dataset.kind = item.kind;
       if (item.sessionId) button.dataset.sessionId = item.sessionId;
-      const label = document.createElement("span");
-      label.className = "now-label";
-      label.textContent = item.label;
+      const marker = document.createElement("span");
+      marker.className = "attention-item-marker";
+      marker.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span");
+      copy.className = "attention-item-copy";
       const mainline = document.createElement("span");
-      mainline.className = "now-mainline";
+      mainline.className = "attention-mainline";
       mainline.textContent = item.mainline;
       const detail = document.createElement("span");
-      detail.className = "now-detail";
-      detail.textContent = item.detail && item.detail !== item.mainline ? item.detail : "";
+      detail.className = "attention-detail";
+      detail.textContent = item.detail && item.detail !== item.mainline
+        ? `${item.label} · ${item.detail}`
+        : item.label;
       const time = document.createElement("time");
-      time.className = "now-time";
+      time.className = "attention-time";
       time.textContent = relativeTime(item.at);
-      button.append(label, mainline, detail, time);
-      button.addEventListener("click", () => item.sessionId && jump(item.sessionId));
-      nowBar.append(button);
+      copy.append(mainline, detail);
+      button.append(marker, copy, time);
+      button.addEventListener("click", () => item.sessionId ? jump(item.sessionId) : scrollToMainline(item.mainline));
+      attentionIndexList.append(button);
     }
   }
 
   function renderGit(chips) {
     gitChips.replaceChildren();
-    for (const chip of chips) {
+    const seenWorktrees = new Set();
+    for (const chip of chips.filter((item) => item.dirty || item.ahead)) {
+      if (seenWorktrees.has(chip.worktree)) continue;
+      seenWorktrees.add(chip.worktree);
       const element = document.createElement("div");
       element.className = "git-chip";
-      element.title = `${chip.cwd}\n${chip.branch || "detached"}`;
+      element.title = `${chip.worktree}\n${chip.branch || "detached"}`;
       const icon = document.createElement("span");
       icon.className = "icon icon-git-branch";
       const name = document.createElement("span");
@@ -520,6 +825,24 @@
     return api(path, { method: "POST", body: JSON.stringify(value) });
   }
 
+  async function intakeAction(path, body = {}, options = {}) {
+    if (intakeBusy) return;
+    intakeBusy = true;
+    for (const button of intakePanel.querySelectorAll("button")) button.disabled = true;
+    try {
+      const result = await post(path, body);
+      if (options.background && result?.job?.id) hiddenImportId = result.job.id;
+      await poll(true);
+      return result;
+    } catch (error) {
+      toast(error.message || String(error));
+    } finally {
+      intakeBusy = false;
+      if (snapshot) renderIntake(snapshot.intake, snapshot.engine, snapshot.engines || []);
+    }
+    return null;
+  }
+
   function setJumpPending(sessionId, pending) {
     const rows = [...directory.querySelectorAll(".fm-line[data-session-id]")]
       .filter((row) => row.dataset.sessionId === sessionId);
@@ -529,9 +852,12 @@
       else row.removeAttribute("aria-busy");
       for (const button of row.querySelectorAll(".session-jump-action")) {
         button.disabled = pending;
-        button.textContent = pending
+        const text = pending
           ? button.dataset.pendingLabel || "正在前往…"
           : button.dataset.idleLabel || "回到终端";
+        const label = button.querySelector(".jump-action-label");
+        if (label) label.textContent = text;
+        else button.textContent = text;
       }
     }
   }
@@ -553,6 +879,27 @@
     } finally {
       pendingJumps.delete(sessionId);
       setJumpPending(sessionId, false);
+    }
+  }
+
+  async function deleteSession(control) {
+    const row = control.closest(".fm-session");
+    const sessionId = row?.dataset.sessionId;
+    if (!sessionId) return;
+    const shared = Number(control.dataset.otherSessions || 0) > 0;
+    const detail = shared
+      ? "这条 session 已与其他 session 共享主题；共享主题脉络会保留。"
+      : "它是主题中唯一的 session；对应主题脉络会一并删除。";
+    const confirmed = window.confirm(`从 SessionMap 删除这条 session 记录并停止再次整理它？\n\n${detail}\n原始 agent transcript 不会被删除。`);
+    if (!confirmed) return;
+    control.disabled = true;
+    try {
+      const result = await post("/api/session/delete", { sessionId });
+      toast(result.removedRoot ? "Session 和对应主题已从 SessionMap 删除" : "Session 记录已从 SessionMap 删除");
+      await poll(true);
+    } catch (error) {
+      control.disabled = false;
+      toast(error.message || String(error));
     }
   }
 
@@ -579,65 +926,34 @@
     await poll(true);
   }
 
-  function overviewDataById(map, id) {
-    let found = null;
-    walk(map?.state?.data, (node) => {
-      if (!found && extractNodeId(node) === id) found = node;
-    });
-    return found;
-  }
-
-  async function toggleOverviewNode(map, id) {
-    const node = id && overviewDataById(map, id);
-    if (!id || !node?.children?.length) return;
-    const next = !Boolean(node.payload?.fold);
-    manualFold[id] = next;
-    saveManualFold();
-    await map.toggleNode(node);
-    decorateRows(map.svg.node());
-  }
-
   async function toggleDirectoryDisclosure(row) {
     const id = row?.dataset.nodeId;
     if (!id) return;
     const anchor = { id, y: row.getBoundingClientRect().top };
-    const session = row.closest(".session-entry");
-    if (session) {
-      const trail = session.querySelector(":scope > .session-trail");
-      if (!trail) return;
-      const expanded = trail.hidden;
-      trail.hidden = !expanded;
+    if (row.dataset.kind === "thoughts") {
+      const overview = row.closest(".topic-section")?.querySelector(":scope > .topic-body > .topic-overview");
+      const outline = overview?.querySelector(":scope > .outline");
+      if (!overview || !outline) return;
+      const expanded = outline.hidden;
+      outline.hidden = !expanded;
+      overview.hidden = !expanded;
       manualFold[id] = !expanded;
-      syncDisclosureControl(row, expanded);
+      row.setAttribute("aria-expanded", String(expanded));
+      const label = row.querySelector(".thought-kicker");
+      if (label) label.textContent = expanded ? "收起脉络" : "脉络";
       saveManualFold();
-      await new Promise((resolve) => requestAnimationFrame(resolve));
-      pinDirectoryAnchor(anchor);
-      return;
-    }
-    const overview = row.closest(".topic-overview");
-    if (!overview) return;
-    const canvas = overview.querySelector(":scope > .overview-canvas");
-    const expanded = canvas.hidden;
-    canvas.hidden = !expanded;
-    manualFold[id] = !expanded;
-    row.setAttribute("aria-expanded", String(expanded));
-    saveManualFold();
-    if (expanded) {
-      const map = await mountOverview(canvas, overview._overviewData, id);
-      await map.fit(1.08);
+      if (expanded && !outline.childElementCount) buildOutline(outline, overview._overviewData);
+    } else {
+      const children = row.closest(".outline-node")?.querySelector(":scope > .outline-children");
+      if (!children) return;
+      const expanded = children.hidden;
+      children.hidden = !expanded;
+      manualFold[id] = !expanded;
+      row.setAttribute("aria-expanded", String(expanded));
+      saveManualFold();
     }
     await new Promise((resolve) => requestAnimationFrame(resolve));
     pinDirectoryAnchor(anchor);
-  }
-
-  async function toggleNodeById(id) {
-    const row = id && directory.querySelector(`.fm-line[data-node-id="${CSS.escape(id)}"]`);
-    if (row) await toggleDirectoryDisclosure(row);
-  }
-
-  function inlineContextToggle(event) {
-    const target = event.target;
-    return target instanceof Element ? target.closest('[data-inline-action="toggle-context"]') : null;
   }
 
   function inlineSessionJump(event) {
@@ -645,38 +961,9 @@
     return target instanceof Element ? target.closest('[data-inline-action="jump-session"]') : null;
   }
 
-  function cancelSessionToggle(nodeId) {
-    const timer = nodeId && pendingSessionClicks.get(nodeId);
-    if (!timer) return;
-    window.clearTimeout(timer);
-    pendingSessionClicks.delete(nodeId);
-    setDisclosurePending(nodeId, false);
-  }
-
-  function setDisclosurePending(nodeId, pending) {
-    if (!nodeId) return;
-    const row = directory.querySelector(`.fm-session[data-node-id="${CSS.escape(nodeId)}"]`);
-    if (!row) return;
-    row.classList.toggle("is-disclosure-pending", pending);
-    if (pending) row.setAttribute("aria-busy", "true");
-    else if (!row.classList.contains("is-jumping")) row.removeAttribute("aria-busy");
-  }
-
-  function scheduleSessionToggle(row) {
-    const nodeId = row.dataset.nodeId;
-    if (!nodeId) return;
-    cancelSessionToggle(nodeId);
-    setDisclosurePending(nodeId, true);
-    const timer = window.setTimeout(async () => {
-      pendingSessionClicks.delete(nodeId);
-      setDisclosurePending(nodeId, false);
-      try {
-        await toggleNodeById(nodeId);
-      } catch (error) {
-        toast(error.message || String(error));
-      }
-    }, SESSION_CLICK_DELAY_MS);
-    pendingSessionClicks.set(nodeId, timer);
+  function inlineSessionDelete(event) {
+    const target = event.target;
+    return target instanceof Element ? target.closest('[data-inline-action="delete-session"]') : null;
   }
 
   function rowFromEvent(event) {
@@ -685,20 +972,29 @@
   }
 
   directory.addEventListener("click", async (event) => {
+    const deleteControl = inlineSessionDelete(event);
+    if (deleteControl) {
+      event.preventDefault();
+      event.stopPropagation();
+      await deleteSession(deleteControl);
+      return;
+    }
     const jumpControl = inlineSessionJump(event);
     if (jumpControl) {
       event.preventDefault();
       event.stopPropagation();
       const sessionRow = jumpControl.closest(".fm-session");
-      if (sessionRow?.dataset.sessionId) await jump(sessionRow.dataset.sessionId);
+      const jumpSessionId = jumpControl.dataset.sessionId || sessionRow?.dataset.sessionId;
+      if (jumpSessionId) await jump(jumpSessionId);
       return;
     }
-    const contextToggle = inlineContextToggle(event);
-    if (contextToggle) {
+    const foldControl = event.target instanceof Element
+      ? event.target.closest('[data-inline-action="fold-topic"]')
+      : null;
+    if (foldControl) {
       event.preventDefault();
       event.stopPropagation();
-      const sessionRow = contextToggle.closest(".fm-session");
-      if (sessionRow) await toggleDirectoryDisclosure(sessionRow);
+      toggleTopicFold(foldControl.closest(".topic-section"));
       return;
     }
     const row = rowFromEvent(event);
@@ -710,10 +1006,10 @@
       openSay(sessionId, row.textContent.trim());
       return;
     }
-    if (row.dataset.action === "session") {
+    if (row.dataset.action === "fold-topic") {
       event.preventDefault();
       event.stopPropagation();
-      scheduleSessionToggle(row);
+      toggleTopicFold(row.closest(".topic-section"));
     } else if (row.dataset.action === "jump" && sessionId) {
       event.preventDefault();
       event.stopPropagation();
@@ -727,6 +1023,12 @@
 
   directory.addEventListener("keydown", async (event) => {
     if (event.key !== "Enter" && event.key !== " ") return;
+    const deleteControl = inlineSessionDelete(event);
+    if (deleteControl) {
+      event.preventDefault();
+      await deleteSession(deleteControl);
+      return;
+    }
     const jumpControl = inlineSessionJump(event);
     if (jumpControl) {
       event.preventDefault();
@@ -734,19 +1036,13 @@
       if (sessionRow?.dataset.sessionId) await jump(sessionRow.dataset.sessionId);
       return;
     }
-    const contextToggle = inlineContextToggle(event);
-    if (contextToggle) {
-      event.preventDefault();
-      const sessionRow = contextToggle.closest(".fm-session");
-      if (sessionRow) await toggleDirectoryDisclosure(sessionRow);
-      return;
-    }
     const row = rowFromEvent(event);
     if (!row) return;
     event.preventDefault();
     if (event.altKey && row.dataset.sessionId) openSay(row.dataset.sessionId, row.textContent.trim());
+    else if (row.dataset.action === "fold-topic") toggleTopicFold(row.closest(".topic-section"));
     else if (row.dataset.action === "jump") await jump(row.dataset.sessionId);
-    else if (row.dataset.action === "session" || row.dataset.action === "toggle") await toggleDirectoryDisclosure(row);
+    else if (row.dataset.action === "toggle") await toggleDirectoryDisclosure(row);
   });
 
   directory.addEventListener("contextmenu", async (event) => {
@@ -762,71 +1058,73 @@
   }, true);
 
   directory.addEventListener("dblclick", async (event) => {
-    if (inlineContextToggle(event) || inlineSessionJump(event)) return;
+    if (inlineSessionJump(event) || inlineSessionDelete(event)) return;
     const row = rowFromEvent(event);
-    if (row?.dataset.action === "session") {
+    if (row?.dataset.kind === "session") {
       if (event.altKey) return;
       event.preventDefault();
       event.stopPropagation();
-      cancelSessionToggle(row.dataset.nodeId);
       await jump(row.dataset.sessionId);
       return;
     }
     if (row) return;
   }, true);
 
-  function bindOverviewEvents(svg, map) {
-    let pointerStart = null;
-    let pointerDragged = false;
-    svg.addEventListener("pointerdown", (event) => {
-      pointerStart = { x: event.clientX, y: event.clientY };
-      pointerDragged = false;
-    }, true);
-    svg.addEventListener("pointermove", (event) => {
-      if (!pointerStart) return;
-      if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) > DRAG_THRESHOLD) pointerDragged = true;
-    }, true);
-    svg.addEventListener("pointerup", () => window.setTimeout(() => { pointerStart = null; }, 0), true);
-    svg.addEventListener("click", async (event) => {
-      if (pointerDragged) {
-        pointerDragged = false;
-        return;
-      }
-      const row = rowFromEvent(event);
-      if (!row) {
-        const target = event.target;
-        const circle = target instanceof Element ? target.closest("g.markmap-node > circle") : null;
-        if (circle) window.setTimeout(() => {
-          const node = circle.parentElement?.__data__;
-          const id = extractNodeId(node);
-          if (!id || !node?.children?.length) return;
-          manualFold[id] = Boolean(node.payload?.fold);
-          saveManualFold();
-        }, 0);
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      if (row.dataset.action === "jump" && row.dataset.sessionId) await jump(row.dataset.sessionId);
-      else if (row.dataset.action === "toggle") await toggleOverviewNode(map, row.dataset.nodeId);
-    }, true);
-    svg.addEventListener("keydown", async (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      const row = rowFromEvent(event);
-      if (!row) return;
-      event.preventDefault();
-      if (row.dataset.action === "jump") await jump(row.dataset.sessionId);
-      else if (row.dataset.action === "toggle") await toggleOverviewNode(map, row.dataset.nodeId);
-    });
-    svg.addEventListener("dblclick", (event) => {
-      if (rowFromEvent(event)) return;
-      event.preventDefault();
-      void map.fit(1.08);
-    }, true);
-  }
-
   archivedButton.addEventListener("click", () => { archiveDrawer.hidden = false; });
   document.getElementById("archive-close").addEventListener("click", () => { archiveDrawer.hidden = true; });
+
+  async function checkNow() {
+    if (checkNowButton.disabled) return;
+    checkNowButton.disabled = true;
+    intakeRecheck.disabled = true;
+    const previous = checkNowButton.textContent;
+    checkNowButton.textContent = "检查中…";
+    try {
+      await post("/api/intake/check", {});
+      await poll(true);
+    } catch (error) {
+      toast(error.message || String(error));
+    } finally {
+      checkNowButton.disabled = false;
+      intakeRecheck.disabled = false;
+      checkNowButton.textContent = previous;
+    }
+  }
+
+  checkNowButton.addEventListener("click", checkNow);
+  intakeRecheck.addEventListener("click", checkNow);
+  historyButton.addEventListener("click", () => {
+    intakePanelOpen = true;
+    hiddenImportId = "";
+    if (snapshot) renderIntake(snapshot.intake, snapshot.engine, snapshot.engines || []);
+    intakePanel.scrollIntoView({ block: "start" });
+  });
+  intakeCustomDate.addEventListener("change", () => snapshot && renderIntakeChoice(snapshot.intake, snapshot.engine, snapshot.engines || []));
+  intakeStart.addEventListener("click", () => {
+    if (!snapshot?.intake) return;
+    const selected = selectedRange(snapshot.intake);
+    intakePanelOpen = false;
+    void intakeAction("/api/intake/start", { cutoffAt: selected.cutoffAt }, { background: true })
+      .then((result) => {
+        if (result?.phase === "importing") directory.scrollIntoView({ block: "start" });
+      });
+  });
+  intakeSkip.addEventListener("click", () => {
+    intakePanelOpen = false;
+    void intakeAction("/api/intake/start", { cutoffAt: null });
+  });
+  intakePause.addEventListener("click", () => void intakeAction("/api/intake/pause"));
+  intakeResume.addEventListener("click", () => void intakeAction("/api/intake/resume"));
+  intakeCancel.addEventListener("click", () => {
+    if (window.confirm("取消尚未完成的历史导入？已整理的工作线会保留，以后仍可补扫。")) {
+      void intakeAction("/api/intake/cancel");
+    }
+  });
+  intakeShowMap.addEventListener("click", () => {
+    hiddenImportId = snapshot?.intake?.job?.id || "";
+    intakePanel.hidden = true;
+    directory.scrollIntoView({ block: "start" });
+  });
 
   engineSelect.addEventListener("change", async () => {
     try {
@@ -901,11 +1199,13 @@
         // still be finishing its layout transition.
         renderChrome(next);
         await renderMap(next.markdown);
+        renderSessionContexts(next.git || []);
         snapshot = next;
         seenRevision = next.revision;
         seenAssetVersion = nextAsset;
       } else {
         renderChrome(next);
+        renderSessionContexts(next.git || []);
         snapshot = next;
       }
       await acknowledgeOpen();
@@ -920,6 +1220,8 @@
     }
   }
 
+  mapShell.addEventListener("scroll", scheduleTopicIndexSelection, { passive: true });
+
   async function boot() {
     try {
       const hasPendingExchange = window.SESSIONMAP_OPEN_TICKET &&
@@ -930,7 +1232,7 @@
       statusLine.textContent = "打开回执已失效 · 正在直接读取本机数据";
       loading.querySelector("span:last-child").textContent = error.message || String(error);
     }
-    if (!window.d3 || !window.markmap?.Transformer || !window.markmap?.Markmap) {
+    if (!window.markmap?.Transformer) {
       throw new Error("本地 markmap 资产未加载");
     }
     transformer = new window.markmap.Transformer();

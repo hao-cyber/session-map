@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 screenshots/
+artifacts/
 *.log
 *.tmp
 .DS_Store

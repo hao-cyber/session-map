@@ -20,6 +20,8 @@ import {
 
 export interface ReadDeltaOptions {
   offset?: number;
+  endOffset?: number;
+  includeFinalLine?: boolean;
   skipUntilNewline?: boolean;
   mtimeMs?: number;
   kind?: SourceKind;
@@ -384,7 +386,8 @@ export function readTranscriptDelta(
   const stat = statSync(path);
   let offset = Math.max(0, Math.floor(options.offset ?? 0));
   if (offset > stat.size) offset = 0;
-  const readLength = Math.min(MAX_READ_BYTES, Math.max(0, stat.size - offset));
+  const endOffset = Math.min(stat.size, Math.max(offset, Math.floor(options.endOffset ?? stat.size)));
+  const readLength = Math.min(MAX_READ_BYTES, Math.max(0, endOffset - offset));
   const raw = Buffer.allocUnsafe(readLength);
   let bytesRead = 0;
   if (readLength) {
@@ -427,6 +430,8 @@ export function readTranscriptDelta(
 
   const lastNewline = bytes.lastIndexOf(10);
   let dataEnd = lastNewline >= dataStart ? lastNewline : dataStart - 1;
+  const reachedRequestedEnd = offset + bytesRead >= endOffset;
+  if (options.includeFinalLine && reachedRequestedEnd && bytesRead > dataStart) dataEnd = bytesRead - 1;
   let nextOffset = offset + dataStart;
   if (dataEnd >= dataStart) {
     nextOffset = offset + dataEnd + 1;

@@ -6,9 +6,8 @@ import APP_JS_IMPORT from "../web/app.js" with { type: "text" };
 import STYLES_CSS_IMPORT from "../web/styles.css" with { type: "text" };
 import MANIFEST_IMPORT from "../web/manifest.webmanifest" with { type: "text" };
 import SESSIONMAP_ICON_IMPORT from "../web/sessionmap-icon.svg" with { type: "text" };
-import D3_JS_IMPORT from "../web/vendor/d3.min.js" with { type: "text" };
+import BRAND_MARK_IMPORT from "../web/brand-mark.svg" with { type: "text" };
 import MARKMAP_LIB_JS_IMPORT from "../web/vendor/markmap-lib.js" with { type: "text" };
-import MARKMAP_VIEW_JS_IMPORT from "../web/vendor/markmap-view.js" with { type: "text" };
 import ARCHIVE_SVG_IMPORT from "../web/vendor/icons/archive.svg" with { type: "text" };
 import CHECK_SVG_IMPORT from "../web/vendor/icons/check-circle-2.svg" with { type: "text" };
 import CHEVRON_SVG_IMPORT from "../web/vendor/icons/chevron-down.svg" with { type: "text" };
@@ -16,11 +15,12 @@ import ALERT_SVG_IMPORT from "../web/vendor/icons/circle-alert.svg" with { type:
 import CLOCK_SVG_IMPORT from "../web/vendor/icons/clock-3.svg" with { type: "text" };
 import CROSSHAIR_SVG_IMPORT from "../web/vendor/icons/crosshair.svg" with { type: "text" };
 import GIT_SVG_IMPORT from "../web/vendor/icons/git-branch.svg" with { type: "text" };
+import LOCATE_LINEAGE_SVG_IMPORT from "../web/vendor/icons/locate-lineage.svg" with { type: "text" };
 import MESSAGE_SVG_IMPORT from "../web/vendor/icons/message-circle.svg" with { type: "text" };
 import MOON_SVG_IMPORT from "../web/vendor/icons/moon.svg" with { type: "text" };
-import PLAY_SVG_IMPORT from "../web/vendor/icons/play.svg" with { type: "text" };
-import ROTATE_SVG_IMPORT from "../web/vendor/icons/rotate-ccw.svg" with { type: "text" };
 import SEND_SVG_IMPORT from "../web/vendor/icons/send.svg" with { type: "text" };
+import TERMINAL_RESTORE_SVG_IMPORT from "../web/vendor/icons/terminal-restore.svg" with { type: "text" };
+import TERMINAL_RETURN_SVG_IMPORT from "../web/vendor/icons/terminal-return.svg" with { type: "text" };
 import X_SVG_IMPORT from "../web/vendor/icons/x.svg" with { type: "text" };
 import ZOOM_SVG_IMPORT from "../web/vendor/icons/zoom-in.svg" with { type: "text" };
 
@@ -31,9 +31,8 @@ const APP_JS = APP_JS_IMPORT as unknown as string;
 const STYLES_CSS = STYLES_CSS_IMPORT as unknown as string;
 const MANIFEST = MANIFEST_IMPORT as unknown as string;
 const SESSIONMAP_ICON = SESSIONMAP_ICON_IMPORT as unknown as string;
-const D3_JS = D3_JS_IMPORT as unknown as string;
+const BRAND_MARK = BRAND_MARK_IMPORT as unknown as string;
 const MARKMAP_LIB_JS = MARKMAP_LIB_JS_IMPORT as unknown as string;
-const MARKMAP_VIEW_JS = MARKMAP_VIEW_JS_IMPORT as unknown as string;
 const ARCHIVE_SVG = ARCHIVE_SVG_IMPORT as unknown as string;
 const CHECK_SVG = CHECK_SVG_IMPORT as unknown as string;
 const CHEVRON_SVG = CHEVRON_SVG_IMPORT as unknown as string;
@@ -41,11 +40,12 @@ const ALERT_SVG = ALERT_SVG_IMPORT as unknown as string;
 const CLOCK_SVG = CLOCK_SVG_IMPORT as unknown as string;
 const CROSSHAIR_SVG = CROSSHAIR_SVG_IMPORT as unknown as string;
 const GIT_SVG = GIT_SVG_IMPORT as unknown as string;
+const LOCATE_LINEAGE_SVG = LOCATE_LINEAGE_SVG_IMPORT as unknown as string;
 const MESSAGE_SVG = MESSAGE_SVG_IMPORT as unknown as string;
 const MOON_SVG = MOON_SVG_IMPORT as unknown as string;
-const PLAY_SVG = PLAY_SVG_IMPORT as unknown as string;
-const ROTATE_SVG = ROTATE_SVG_IMPORT as unknown as string;
 const SEND_SVG = SEND_SVG_IMPORT as unknown as string;
+const TERMINAL_RESTORE_SVG = TERMINAL_RESTORE_SVG_IMPORT as unknown as string;
+const TERMINAL_RETURN_SVG = TERMINAL_RETURN_SVG_IMPORT as unknown as string;
 const X_SVG = X_SVG_IMPORT as unknown as string;
 const ZOOM_SVG = ZOOM_SVG_IMPORT as unknown as string;
 
@@ -57,9 +57,8 @@ const EMBEDDED: Record<string, Asset> = {
   "styles.css": { body: STYLES_CSS, contentType: "text/css; charset=utf-8", source: "styles.css" },
   "manifest.webmanifest": { body: MANIFEST, contentType: "application/manifest+json; charset=utf-8", source: "manifest.webmanifest" },
   "sessionmap-icon.svg": { body: SESSIONMAP_ICON, contentType: "image/svg+xml", source: "sessionmap-icon.svg" },
-  "vendor/d3.min.js": { body: D3_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/d3.min.js" },
+  "brand-mark.svg": { body: BRAND_MARK, contentType: "image/svg+xml", source: "brand-mark.svg" },
   "vendor/markmap-lib.js": { body: MARKMAP_LIB_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/markmap-lib.js" },
-  "vendor/markmap-view.js": { body: MARKMAP_VIEW_JS, contentType: "text/javascript; charset=utf-8", source: "vendor/markmap-view.js" },
   "vendor/icons/archive.svg": { body: ARCHIVE_SVG, contentType: "image/svg+xml", source: "vendor/icons/archive.svg" },
   "vendor/icons/check-circle-2.svg": { body: CHECK_SVG, contentType: "image/svg+xml", source: "vendor/icons/check-circle-2.svg" },
   "vendor/icons/chevron-down.svg": { body: CHEVRON_SVG, contentType: "image/svg+xml", source: "vendor/icons/chevron-down.svg" },
@@ -67,11 +66,12 @@ const EMBEDDED: Record<string, Asset> = {
   "vendor/icons/clock-3.svg": { body: CLOCK_SVG, contentType: "image/svg+xml", source: "vendor/icons/clock-3.svg" },
   "vendor/icons/crosshair.svg": { body: CROSSHAIR_SVG, contentType: "image/svg+xml", source: "vendor/icons/crosshair.svg" },
   "vendor/icons/git-branch.svg": { body: GIT_SVG, contentType: "image/svg+xml", source: "vendor/icons/git-branch.svg" },
+  "vendor/icons/locate-lineage.svg": { body: LOCATE_LINEAGE_SVG, contentType: "image/svg+xml", source: "vendor/icons/locate-lineage.svg" },
   "vendor/icons/message-circle.svg": { body: MESSAGE_SVG, contentType: "image/svg+xml", source: "vendor/icons/message-circle.svg" },
   "vendor/icons/moon.svg": { body: MOON_SVG, contentType: "image/svg+xml", source: "vendor/icons/moon.svg" },
-  "vendor/icons/play.svg": { body: PLAY_SVG, contentType: "image/svg+xml", source: "vendor/icons/play.svg" },
-  "vendor/icons/rotate-ccw.svg": { body: ROTATE_SVG, contentType: "image/svg+xml", source: "vendor/icons/rotate-ccw.svg" },
   "vendor/icons/send.svg": { body: SEND_SVG, contentType: "image/svg+xml", source: "vendor/icons/send.svg" },
+  "vendor/icons/terminal-restore.svg": { body: TERMINAL_RESTORE_SVG, contentType: "image/svg+xml", source: "vendor/icons/terminal-restore.svg" },
+  "vendor/icons/terminal-return.svg": { body: TERMINAL_RETURN_SVG, contentType: "image/svg+xml", source: "vendor/icons/terminal-return.svg" },
   "vendor/icons/x.svg": { body: X_SVG, contentType: "image/svg+xml", source: "vendor/icons/x.svg" },
   "vendor/icons/zoom-in.svg": { body: ZOOM_SVG, contentType: "image/svg+xml", source: "vendor/icons/zoom-in.svg" },
 };

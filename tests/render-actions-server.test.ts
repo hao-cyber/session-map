@@ -10,6 +10,7 @@ import { activeSessionCount, buildNowItems, renderMarkdown } from "../src/render
 import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "../src/server.ts";
 import { StateStore } from "../src/state.ts";
 import { TreeRuntime } from "../src/tree.ts";
+import { TranscriptWatcher } from "../src/watcher.ts";
 import { cleanup, sessionRecord, temporaryDirectory, transcriptMeta } from "./helpers.ts";
 
 const directories: string[] = [];
@@ -132,21 +133,30 @@ describe("safe rendering and attention ordering", () => {
     const secondLine = sessions.find((line) => line.includes('data-session-id="topic-session-b"'))!;
     expect(firstLine).toContain("构建本地网页发布流程");
     expect(firstLine).toContain("等待选择安装引导");
-    expect(firstLine).toContain("脉络 2");
-    expect(firstLine).toContain('data-action="session"');
-    expect(firstLine).toContain('data-inline-action="toggle-context"');
+    expect(firstLine).toContain(`data-cwd="${process.cwd()}"`);
+    expect(firstLine).toContain("session-context");
+    expect(firstLine).toContain("session-created");
+    expect(firstLine).toContain("session-updated");
+    expect(firstLine).not.toContain("定位脉络");
+    expect(firstLine).toContain('data-action="none"');
+    expect(firstLine).not.toContain('data-cursor-id=');
+    expect(firstLine).not.toContain('data-inline-action="locate-lineage"');
     expect(firstLine).toContain('data-inline-action="jump-session"');
-    expect(firstLine).toContain(">回到终端</button>");
+    expect(firstLine).toContain('data-inline-action="delete-session"');
+    expect(firstLine).toContain('<span class="jump-action-label">回到终端</span></button>');
     expect(firstLine).toContain('data-pending-label="回到中…"');
     expect(secondLine).toContain("复核发布流程");
-    expect(secondLine).toContain(">恢复</button>");
+    expect(secondLine).toContain('<span class="jump-action-label">恢复终端</span></button>');
     expect(secondLine).toContain('data-pending-label="恢复中…"');
-    expect(lines.indexOf(firstLine)).toBeGreaterThan(topic);
-    expect(lines.indexOf(secondLine)).toBeLessThan(summary);
+    expect(summary).toBeGreaterThan(topic);
+    expect(lines.indexOf(firstLine)).toBeGreaterThan(summary);
+    expect(lines.indexOf(secondLine)).toBeGreaterThan(summary);
     expect(lines[summary]).toContain('data-default-fold="true"');
+    expect(lines[summary]).toContain("主题脉络");
     expect(summary).toBeLessThan(thought);
     expect(lines[thought]).toStartWith("    - ");
-    expect(lines.some((line) => line.startsWith("    - ") && line.includes("原生壳增加维护成本，改用本地网页"))).toBeTrue();
+    expect(markdown).not.toContain('data-kind="snapshot"');
+    expect(markdown).not.toContain("原生壳增加维护成本，改用本地网页");
   });
 
   test("keeps session chronology stable while exposing last activity as metadata", async () => {
@@ -191,6 +201,7 @@ describe("safe rendering and attention ordering", () => {
     const markdown = renderMarkdown(store.snapshot());
     expect(markdown).not.toContain("[标题](javascript:");
     expect(markdown).not.toContain("[脉络](javascript:");
+    expect(markdown).not.toContain("&#91;脉络&#93;");
     expect(markdown).not.toContain("<img src=x");
     expect(markdown).toContain("&#91;标题&#93;");
     expect(markdown).toContain("&lt;img src=x onerror=alert&#40;1&#41;&gt;");
@@ -677,6 +688,44 @@ describe("local HTTP security boundary", () => {
     expect(restored.status).toBe(200);
     expect(fixture.store.snapshot().archived).not.toContain(fixture.rootId);
   });
+
+  test("deletes a session through a same-origin explicit action and prevents re-import", async () => {
+    const fixture = await runningServer(true);
+    const headers = { Origin: fixture.server.url, "Content-Type": "application/json" };
+    const response = await fetch(`${fixture.server.url}/api/session/delete`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ sessionId: "api-session" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, removedRoot: true });
+    expect(fixture.store.snapshot().sessions["api-session"]).toBeUndefined();
+    expect(fixture.store.snapshot().excludedSessions["claude:api-session"]).toBeString();
+  });
+
+  test("exposes history choice and manual check through same-origin intake APIs", async () => {
+    const fixture = await runningServer();
+    const initial = await (await fetch(`${fixture.server.url}/api/snapshot`)).json();
+    expect(initial.intake.phase).toBe("awaiting-choice");
+    const headers = { Origin: fixture.server.url, "Content-Type": "application/json" };
+
+    const checked = await fetch(`${fixture.server.url}/api/intake/check`, {
+      method: "POST",
+      headers,
+      body: "{}",
+    });
+    expect(checked.status).toBe(200);
+    expect((await checked.json()).lastDiscoveryAt).toBeString();
+
+    const skipped = await fetch(`${fixture.server.url}/api/intake/start`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ cutoffAt: null }),
+    });
+    expect(skipped.status).toBe(200);
+    expect((await skipped.json()).phase).toBe("complete");
+    expect(fixture.store.snapshot().intake.phase).toBe("complete");
+  });
 });
 
 async function runningServer(withMainline = false): Promise<{
@@ -693,11 +742,20 @@ async function runningServer(withMainline = false): Promise<{
     rootId = (await runtime.applyRoll(transcriptMeta("api-session", root), { mainline: "API work", ask: { kind: "none", hint: "" }, ops: [] })).rootId;
   }
   const monitor = new SessionMonitor(store);
+  const watcher = new TranscriptWatcher(
+    store,
+    runtime,
+    root,
+    undefined,
+    async () => ({ mainline: "unused", ask: { kind: "none", hint: "" }, ops: [] }),
+    () => [],
+  );
   const server = new SessionMapHttpServer({
     store,
     runtime,
     actions: new ActionRouter(store),
     monitor,
+    watcher,
     assets: new AssetStore(),
   }, { stateDirectory: root, port: 0 });
   servers.push(server);

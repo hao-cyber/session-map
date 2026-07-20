@@ -2,13 +2,13 @@
 
 ## 产品不变量
 
-SessionMap 是外置思维树。主线是一件正在推进的工作；session 只是只读数据源和树上的光标。结束 session 不能删除它承载的对象，启动替代 session 也不能机械地创建替代对象。
+SessionMap 是外置思维树。主线是一件正在推进的工作；session 只是只读数据源和树上的光标。结束 session 不能自动删除它承载的对象，启动替代 session 也不能机械地创建替代对象；用户明确执行隐私删除时例外。
 
 “三秒恢复”按以下顺序回答：
 
-1. **现在什么最需要我？** now-bar 先显示等拍板、等回复、卡点与刚完成的新产出。
+1. **现在什么最需要我？** 左侧待处理分组先显示等拍板、等回复、等审阅与卡点。
 2. **当时思考到哪里？** 稳定主线、失败尝试、close 原因、关键决定和 session 光标共同重建路径。
-3. **怎样回到那里？** 每个 session 入口都能聚焦还活着的终端，或复活已经关闭的终端。入口只衰减，不消失。
+3. **怎样回到那里？** 每个 session 入口都能聚焦还活着的终端，或复活已经关闭的终端。入口不会被系统静默删除；用户可明确删除 SessionMap 记录。
 
 更完整的产品裁决依据见 [产品与设计宪章](product-design.md)。
 
@@ -39,12 +39,16 @@ Runtime 拥有封闭边界：
 Claude / Codex / Kimi / Grok / MiniMax provider source（只读）
         │
         ├─ provider registry：发现、身份、格式、cwd 与恢复协议
-        ├─ watcher：发现文件变化、linger、冷却、60 个近期 session 上限
+        ├─ watcher / intake coordinator：全量 metadata inventory、首次 baseline、耐久历史任务；
+        │  常态 live 路径使用 linger、冷却和 60 个近期 session 上限
         ├─ adapter：提取结构信号，过滤 thinking 与工具结果正文
         │
         ▼
-串行 roll worker
-        │  一次性调用选定模型，得到 mainline / ask / ops
+keyed bounded roll workers
+        │  同 session 有序、不同 session 有界并行，得到候选 mainline / ask / ops
+        ▼
+串行 commit gate
+        │  校验 source/target 语义投影；过期候选用最新状态重算
         ▼
 Tree runtime（唯一写者）
         │  写边界、状态机、offset-before-apply、原子落盘
@@ -57,7 +61,11 @@ state.json + open 回执签名密钥
         └─ Orca / iTerm2 / Terminal 动作层
 ```
 
-Watcher 只采集与调度，永远不在轮询线程里等待慢模型。Roll CLI 是 one-shot、无状态执行器；树和 offset 才是持久状态来源。
+Watcher 只采集与调度，永远不在轮询线程里等待慢模型。最多三个 roll worker，其中 history
+最多占两个槽，给 live 保留一个槽；同一逻辑 session 仍严格串行。模型输出只是候选，所有
+cursor 提交与树应用经过串行 commit gate；候选依赖的主线已变化时先用最新状态重算。
+Roll CLI 是 one-shot、无状态执行器；树和 offset 才是持久状态来源。完整取舍见
+[ADR 0008](decisions/0008-bounded-parallel-rolls.md)。
 
 ## 轨迹与滚动快照
 
@@ -66,7 +74,8 @@ SessionMap 不把任何模型摘要声明为不可变真理。它区分两种存
 - 思考树保存不可静默抹除的历史轨迹。节点表达的是当时的尝试、发现、判断或决定；
   后续可以证明它错误，但必须用 close 原因和新方向显式记录修订。
 - 每个 session 的 rolling snapshot 是可修订读取投影，包含整段 session 的稳定主标题、
-  最新进展小标题和最多六个因果路标。它为目录和三秒恢复服务，不承担历史审计职责。
+  最新进展小标题和最多六个因果路标。它为模型滚动、目录和兼容服务，不承担历史审计
+  职责，也不在 Web 中成为 session 私有历史；权威脉络始终是主题树。
 
 因此“保留历史”与“允许改变认识”并不冲突：系统拒绝的是无痕覆盖，而不是修订本身。
 状态机只允许 `waiting → active` 的 unblock。`resolved` / `dead` 是一次已经发生的历史
@@ -74,7 +83,15 @@ SessionMap 不把任何模型摘要声明为不可变真理。它区分两种存
 
 ## 持久化与提交语义
 
-`state.json` 同时保存思维树和 transcript offset。每次写入都使用当前状态目录内的私有临时文件，执行 `fsync` 后原子 rename。这样 watcher、服务或 roll 任一环节崩溃重启，都不需要从 transcript 总头重新推导状态。
+`state.json` 同时保存思维树、live transcript offset、首次摄取/历史任务和最小化的 session 排除标记。每次写入都使用当前状态目录内的私有临时文件，执行 `fsync` 后原子 rename。这样 watcher、服务或 roll 任一环节崩溃重启，都不需要从 transcript 总头重新推导状态。
+
+全新空状态先进入 `awaiting-choice`。Coordinator 只做全量 metadata inventory；用户确认时
+为所有发现的 source 写入 live 高水位，并为命中范围且尚未导入的逻辑 session 建立独立
+history cursor。历史 cursor 追到确认时的固定 `plannedSize` / snapshot 版本后标记 imported；
+同 source 在此之前阻塞 live 消费，其他 source 仍可继续。历史任务和 live 都遵守
+cursor-before-apply，失败项耐久暂停，重启后从已提交游标继续。已有树、session 或 offset
+的旧 schema 修复为 intake complete，绝不因升级触发回扫。完整取舍见
+[ADR 0006](decisions/0006-explicit-history-intake.md)。
 
 Session 首次进入状态时由 ingestion/runtime 写入 `firstSeenAt`，此后保持不变，作为同一主线
 内稳定目录顺序的唯一依据。`lastTranscriptAt` 继续随只读 transcript 活动更新，但只用于
@@ -100,6 +117,7 @@ Roll 故意采用 at-most-once：
 - 当前主线子树最多约 120 行；
 - 每轮最多 6 个 op；
 - 同一 session 至少冷却 45 秒；
+- 最多三个并发 roll，且 history 最多两个；
 - 最多监控最近活跃的 60 个 transcript session。
 
 标准目录、provider 环境变量目录与 Orca 管理的 Codex home 按 provider + session id
@@ -130,6 +148,12 @@ resolved 和 dead 节点都是被明确记录过的历史判断，不会删除�
 
 Archive 只把主线移出当前阅读面，不停止 ingestion，不删除历史。恢复和 toast 撤销都操作同一个稳定 root id。
 
+显式 session 删除走 TreeRuntime 单写者：清除 session、相关 offset/import/history 项，并写入
+`provider:sessionId → deletedAt` 排除标记。Watcher 在 inventory、排队、提交和失败恢复边界
+都检查该标记。若被删 session 是主题唯一入口，安全删除整棵主题树；共享主题缺少逐字段
+来源归属，不能证明哪些节点只由该 session 产生，因此保留并在 UI 中如实披露。完整取舍见
+[ADR 0011](decisions/0011-explicit-session-deletion-and-repository-privacy.md)。
+
 Session 动作使用确定的降级阶梯。持久 handle 和 PID 只作为候选提示，不是可信身份：
 
 1. 已知 Orca handle 由 Orca 切换命令现场验证；
@@ -149,16 +173,22 @@ provider 特例。完整取舍见 [ADR 0002](decisions/0002-provider-session-ada
 
 唯一正式界面是 Bun 服务提供的同一地图文档。系统浏览器是跨平台基线，installed Web App
 和 macOS 极薄壳只提供独立窗口与 Dock 身份。Bun 服务同时负责 transcript watcher、状态写入、vendored
-Web 资产和受回环同源边界保护的 API；服务端读取投影提供主题、稳定 session 目录、
-有界 session 脉络与主题全貌结构，展示容器只持有滚动、披露、局部相机、窗口几何等读取
-偏好，不保存
+Web 资产和受回环同源边界保护的 API；服务端读取投影提供主题、主题唯一脉络、稳定
+session 目录及脉络中的 cursor 标记。主题行分别拥有脉络披露与 Sessions 目录披露，
+session 行以“回到终端”或“恢复终端”为主要动作，并提供明确的本地记录删除控制。展示容器只持有滚动、披露、局部相机、
+窗口几何等读取偏好，不保存
 第二份业务状态。任意本机浏览器或新 profile 直接打开固定地址都读取同一份真实 snapshot。
-默认目录使用页面纵向滚动；二维平移缩放只属于
-按需展开的主题全貌，不能成为寻找 session 的旁路导航机制。
+默认目录使用页面纵向滚动；二维平移缩放只属于按需展开的主题脉络，不能成为寻找
+session 的旁路导航机制。
+
+宽桌面的左侧待处理/工作线索引与右侧主题 section 由同一份 render projection 派生；
+待处理项复用 `buildNowItems` 的优先级但过滤掉不要求用户行动的 busy/recent，工作线索引
+只提供同页滚动锚点。Session 的 cwd 与时间来自持久状态；Git worktree、branch、dirty
+和 ahead 由 monitor 对 cwd 只读采集并随 snapshot 返回，不进入状态文件或语义判断。
 
 服务可由 `sessionmap serve` 前台运行，也可用 standalone CLI 的 `sessionmap install`
 安装为当前用户的 launchd 服务。`sessionmap open` 负责打开页面并确认首帧；`sessionmap now`
-只读同一 Now 投影，编号跳转仍通过后台 HTTP 动作完成。macOS 壳在服务不健康时只调用统一
+只读同一行动优先级投影，编号跳转仍通过后台 HTTP 动作完成。macOS 壳在服务不健康时只调用统一
 install 事务，不直接启动第二服务。Terminal、iTerm 和 Orca 仍是跳转/恢复适配层。
 
 展示容器契约与回滚见 [ADR 0004](decisions/0004-map-document-desktop-hosts.md) 和
@@ -183,6 +213,11 @@ Web 资产采用完整 bundle 内容版本。HTML、脚本、样式、vendor 和
 - body 是 JSON object。
 
 模型标签、session 标题、git 字段都按不可信文本处理，先做 HTML escape，再实体化 Markdown 元字符，阻断 HTML 标签和 `x](javascript:...)` 两类注入。静态资源通过 realpath + 目录边界检查。Transcript 文件从不以写模式打开。
+
+用户状态、运行日志和真实 UI 捕获不属于源码或发布输入。构建只嵌入显式 vendored Web 资产；
+Git 隐私门禁拒绝状态目录、`state.json`、截图/捕获目录、具体 macOS 用户目录与常见密钥形态。
+StateStore 在创建目录前向上检查 `.git` 边界，拒绝任何 Git worktree 内的 `--state-dir`，使真实
+主题、session、脉络和快照不能因配置错误写进仓库工作树。
 
 本机回环信任边界、备选方案与回滚见
 [ADR 0003](decisions/0003-loopback-browser-trust.md)。

@@ -12,6 +12,10 @@ export type AskKind = (typeof ASK_KINDS)[number];
 export type Provider = (typeof PROVIDERS)[number];
 export type EngineName = (typeof ENGINE_NAMES)[number];
 export type SessionStatus = "busy" | "idle" | "recent" | "closed" | "unknown";
+export type SourceKind = "append" | "snapshot";
+export type IntakePhase = "awaiting-choice" | "importing" | "complete";
+export type HistoryJobStatus = "running" | "paused" | "complete" | "cancelled";
+export type HistoryItemStatus = "pending" | "running" | "complete" | "skipped" | "failed";
 
 export interface TrailNode {
   id: string;
@@ -72,6 +76,38 @@ export interface OffsetRecord {
   ignored?: boolean;
 }
 
+export interface HistoryImportItem {
+  key: string;
+  provider: Provider;
+  sessionId: string;
+  path: string;
+  kind: SourceKind;
+  plannedSize: number;
+  plannedMtimeMs: number;
+  cursor: number;
+  skipUntilNewline?: boolean;
+  status: HistoryItemStatus;
+  reconcile: boolean;
+  error?: string;
+}
+
+export interface HistoryImportJob {
+  id: string;
+  createdAt: string;
+  cutoffAt: string;
+  highWaterAt: string;
+  status: HistoryJobStatus;
+  items: Record<string, HistoryImportItem>;
+}
+
+export interface IntakeState {
+  phase: IntakePhase;
+  coverageStartAt: string | null;
+  lastDiscoveryAt: string | null;
+  imported: Record<string, string>;
+  job: HistoryImportJob | null;
+}
+
 export interface TrailState {
   schemaVersion: number;
   revision: number;
@@ -82,8 +118,16 @@ export interface TrailState {
   mainlineIndex: Record<string, string>;
   sessions: Record<string, SessionRecord>;
   offsets: Record<string, OffsetRecord>;
+  excludedSessions: Record<string, string>;
+  intake: IntakeState;
   archived: string[];
   engine: EngineName;
+}
+
+export interface DeleteSessionResult {
+  ok: boolean;
+  removedRoot: boolean;
+  remainingSessions: number;
 }
 
 export type GrowOp = {
@@ -149,6 +193,7 @@ export interface EngineAvailability {
 
 export interface GitChip {
   cwd: string;
+  worktree: string;
   name: string;
   branch: string;
   dirty: number;

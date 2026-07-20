@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SessionMap · 读取层级概念稿</title>
+  <style>
+    :root {
+      --canvas: #f7f7f8;
+      --surface: #ffffff;
+      --hover: #f1f1f3;
+      --line: #e4e4e8;
+      --branch: #aab2be;
+      --ink: #202124;
+      --secondary: #50525a;
+      --muted: #6b6e78;
+      --faint: #a4a7af;
+      --decision: #b4233a;
+      --waiting: #9a5b00;
+      --busy: #18734b;
+      --blocked: #c2413b;
+      --fresh: #6f55c7;
+      --focus: #586273;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { width: 100%; min-height: 100%; margin: 0; }
+    body {
+      color: var(--ink);
+      background: var(--canvas);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+    button { font: inherit; color: inherit; }
+
+    .app {
+      width: 100%;
+      max-width: 100vw;
+      min-width: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: 56px 48px minmax(0, 1fr);
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 20px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255, 255, 255, .9);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .brand-mark { position: relative; width: 28px; height: 24px; }
+    .brand-mark::before, .brand-mark::after {
+      position: absolute;
+      height: 1px;
+      background: var(--branch);
+      content: "";
+      transform-origin: left center;
+    }
+    .brand-mark::before { width: 16px; left: 5px; top: 13px; transform: rotate(-26deg); }
+    .brand-mark::after { width: 12px; left: 18px; top: 6px; transform: rotate(46deg); }
+    .brand-mark i { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: var(--secondary); }
+    .brand-mark i:nth-child(1) { left: 1px; top: 15px; }
+    .brand-mark i:nth-child(2) { left: 17px; top: 4px; background: var(--fresh); }
+    .brand-mark i:nth-child(3) { right: 0; bottom: 1px; background: var(--busy); }
+    .brand strong { display: block; font-size: 15px; font-weight: 680; letter-spacing: -.02em; }
+    .brand span { display: block; margin-top: 2px; color: var(--muted); font-size: 10px; }
+    .health { min-width: 0; color: var(--secondary); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .toolbar { display: flex; gap: 8px; }
+    .quiet {
+      min-height: 30px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--secondary);
+      background: var(--surface);
+      font-size: 11px;
+    }
+
+    .now {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 240px repeat(3, minmax(0, 1fr));
+      align-items: stretch;
+      border-bottom: 1px solid var(--line);
+      background: #fafafb;
+    }
+    .now-label { display: flex; align-items: center; gap: 8px; padding: 0 18px; color: var(--secondary); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
+    .count { min-width: 18px; padding: 1px 5px; border-radius: 9px; background: #e9e9ec; color: var(--muted); text-align: center; letter-spacing: 0; }
+    .now-item {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 7px auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 0 14px;
+      border-left: 1px solid var(--line);
+      font-size: 11px;
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--branch); }
+    .dot.decision { background: var(--decision); box-shadow: 0 0 0 3px rgba(180,35,58,.08); }
+    .dot.busy { background: var(--busy); }
+    .dot.waiting { background: var(--waiting); }
+    .now-kind { font-weight: 700; white-space: nowrap; }
+    .now-kind.decision { color: var(--decision); }
+    .now-kind.busy { color: var(--busy); }
+    .now-kind.waiting { color: var(--waiting); }
+    .now-topic { overflow: hidden; color: var(--ink); font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+    .now-time { color: var(--muted); font-size: 10px; white-space: nowrap; }
+
+    .workspace { min-height: 0; display: grid; grid-template-columns: 240px minmax(0, 1fr); }
+    .index {
+      min-height: 0;
+      padding: 20px 12px 48px;
+      border-right: 1px solid var(--line);
+      background: #f1f1f3;
+    }
+    .index-head { height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 9px; color: var(--muted); font-size: 10px; font-weight: 720; letter-spacing: .08em; }
+    .index-list { display: grid; gap: 3px; margin-top: 5px; }
+    .index-row {
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: 8px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 9px;
+      padding: 6px 9px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      color: var(--secondary);
+      background: transparent;
+      text-align: left;
+    }
+    .index-row.current { color: var(--ink); border-color: #dddde2; background: var(--surface); box-shadow: inset 2px 0 0 var(--focus); }
+    .index-marker { width: 6px; height: 6px; border-radius: 50%; background: var(--branch); }
+    .index-marker.decision { background: var(--decision); }
+    .index-marker.busy { background: var(--busy); }
+    .index-marker.waiting { background: var(--waiting); }
+    .index-copy { min-width: 0; }
+    .index-title { display: block; overflow: hidden; font-size: 11px; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+    .index-count { min-width: 20px; padding: 1px 5px; border-radius: 9px; color: var(--muted); background: rgba(32,33,36,.055); font-size: 9px; text-align: center; }
+    .index-note { margin: 18px 9px 0; padding-top: 14px; border-top: 1px solid #dedee3; color: var(--muted); font-size: 10px; line-height: 1.55; }
+
+    .reading { min-width: 0; overflow: hidden; }
+    .reading-inner { width: min(1040px, calc(100% - 48px)); margin: 0 auto 0 clamp(24px, 3.2vw, 48px); padding: 24px 0 80px; }
+    .topic { margin-bottom: 36px; }
+    .topic-header {
+      min-height: 60px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 24px;
+      padding: 8px 4px 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .topic-heading { display: flex; align-items: flex-start; gap: 11px; min-width: 0; }
+    .topic-heading .dot { margin-top: 7px; flex: 0 0 auto; }
+    .topic-title { margin: 0; font-size: 18px; font-weight: 680; letter-spacing: -.025em; line-height: 1.35; }
+    .topic-summary { margin-top: 3px; color: var(--secondary); font-size: 11px; line-height: 1.45; }
+    .topic-actions { display: flex; align-items: center; gap: 12px; }
+    .state-word { color: var(--decision); font-size: 11px; font-weight: 720; }
+    .overview {
+      min-height: 32px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      color: var(--secondary);
+      background: var(--surface);
+      font-size: 11px;
+      font-weight: 620;
+    }
+
+    .sessions { position: relative; margin: 0 0 0 16px; padding: 5px 0 0 26px; }
+    .sessions::before { position: absolute; top: 0; bottom: 18px; left: 0; width: 1px; background: rgba(170,178,190,.55); content: ""; }
+    .session { position: relative; }
+    .session::before { position: absolute; top: 36px; left: -25px; width: 20px; height: 1px; background: rgba(170,178,190,.55); content: ""; }
+    .session-row {
+      min-height: 76px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 20px;
+      padding: 11px 8px 10px;
+      border: 0;
+      border-bottom: 1px solid rgba(228,228,232,.84);
+      background: transparent;
+    }
+    .session.open .session-row { background: rgba(255,255,255,.72); box-shadow: inset 2px 0 0 rgba(88,98,115,.32); }
+    .session-main { min-width: 0; }
+    .session-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 660; }
+    .provider { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); font-size: 8px; font-weight: 720; letter-spacing: .04em; }
+    .progress { margin-top: 4px; color: var(--secondary); font-size: 12px; line-height: 1.4; }
+    .context { display: flex; gap: 7px; margin-top: 5px; color: var(--muted); font-size: 10px; white-space: nowrap; }
+    .context span + span::before { margin-right: 7px; color: var(--faint); content: "·"; }
+    .session-side { min-width: 150px; display: grid; grid-template-columns: auto auto; align-items: center; justify-content: end; gap: 8px; }
+    .session-status { grid-column: 1 / -1; color: var(--secondary); font-size: 10px; font-weight: 680; text-align: right; }
+    .session-status.busy { color: var(--busy); }
+    .disclose, .jump { min-height: 30px; padding: 0 9px; border-radius: 6px; font-size: 10px; font-weight: 650; }
+    .disclose { border: 0; color: var(--secondary); background: transparent; }
+    .jump { border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+
+    .trail { position: relative; margin: 0 0 8px 22px; padding: 10px 0 12px 27px; border-left: 1px solid var(--branch); }
+    .trail-head { margin-bottom: 5px; color: var(--muted); font-size: 9px; font-weight: 720; letter-spacing: .08em; }
+    .trail-item { position: relative; min-height: 36px; display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: baseline; gap: 10px; padding: 8px 8px 7px 0; color: var(--secondary); font-size: 11px; line-height: 1.5; }
+    .trail-item::before { position: absolute; top: 17px; left: -28px; width: 20px; height: 1px; background: var(--branch); content: ""; }
+    .trail-item::after { position: absolute; top: 14px; left: -31px; width: 6px; height: 6px; border: 1px solid var(--branch); border-radius: 50%; background: var(--canvas); content: ""; }
+    .trail-kind { color: var(--muted); font-size: 10px; font-weight: 650; }
+    .trail-item > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+    .trail-item.dead .trail-kind { color: var(--muted); }
+    .trail-item.dead > span:last-child { color: var(--muted); }
+    .trail-item.current { color: var(--ink); font-weight: 590; }
+    .trail-item.current::after { border-color: var(--focus); background: var(--focus); }
+    .because { color: var(--muted); font-weight: 450; }
+
+    .topic.secondary .topic-title { font-size: 16px; }
+    .topic.secondary .topic-header { min-height: 54px; }
+    .topic.secondary .sessions { padding-top: 0; }
+
+    button { cursor: pointer; transition: background 180ms ease, border-color 180ms ease, color 180ms ease; }
+    button:hover { background: var(--hover); }
+    button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+    @media (max-width: 900px) {
+      .now { grid-template-columns: 72px repeat(3, minmax(210px, 1fr)); overflow-x: auto; }
+      .now-label { padding: 0 12px; }
+      .workspace { display: block; }
+      .index { display: none; }
+      .reading-inner { width: calc(100% - 32px); }
+      .topbar { grid-template-columns: minmax(180px, 1fr) auto; }
+      .health { display: none; }
+    }
+    @media (max-width: 560px) {
+      .app { grid-template-rows: 52px 46px minmax(0, 1fr); }
+      .topbar { padding: 0 12px; }
+      .quiet:first-child { display: none; }
+      .reading,
+      .reading-inner,
+      .topic,
+      .sessions,
+      .session { min-width: 0; max-width: 100%; }
+      .reading-inner { width: calc(100% - 20px); padding-top: 12px; }
+      .topic-header { grid-template-columns: 1fr; gap: 6px; }
+      .topic-actions { padding-left: 17px; }
+      .sessions { margin-left: 7px; padding-left: 15px; }
+      .session::before { left: -14px; width: 11px; }
+      .session-row { grid-template-columns: 1fr; gap: 8px; }
+      .session-side { min-width: 0; grid-template-columns: auto auto auto; justify-content: start; }
+      .session-status { grid-column: auto; text-align: left; }
+      .context { flex-wrap: wrap; white-space: normal; }
+      .trail { width: calc(100% - 9px); max-width: calc(100% - 9px); margin-left: 9px; padding-left: 20px; }
+      .trail-item { width: 100%; min-width: 0; grid-template-columns: 58px minmax(0, 1fr); }
+      .trail-item::before { left: -21px; width: 14px; }
+      .trail-item::after { left: -24px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>SessionMap</strong><span>6 个活跃 session · 刚刚更新</span></span>
+      </div>
+      <div class="health">所有 transcript 正常 · 1 个工作目录有未提交改动</div>
+      <div class="toolbar"><button class="quiet">已归档 4</button><button class="quiet">Roll · Codex</button></div>
+    </header>
+
+    <section class="now" aria-label="现在需要注意的工作">
+      <div class="now-label">现在 <span class="count">3</span></div>
+      <div class="now-item"><span class="dot decision"></span><span class="now-kind decision">等拍板</span><span class="now-topic">SessionMap 信息架构</span><span class="now-time">刚刚</span></div>
+      <div class="now-item"><span class="dot busy"></span><span class="now-kind busy">运行中</span><span class="now-topic">发布安装链路</span><span class="now-time">2 分钟</span></div>
+      <div class="now-item"><span class="dot waiting"></span><span class="now-kind waiting">等回复</span><span class="now-topic">音频路由恢复</span><span class="now-time">12 分钟</span></div>
+    </section>
+
+    <div class="workspace">
+      <aside class="index" aria-label="工作线索引">
+        <div class="index-head"><span>工作线</span><span>5</span></div>
+        <nav class="index-list">
+          <button class="index-row current"><span class="index-marker decision"></span><span class="index-copy"><span class="index-title">SessionMap 信息架构</span></span><span class="index-count">3</span></button>
+          <button class="index-row"><span class="index-marker busy"></span><span class="index-copy"><span class="index-title">发布安装链路</span></span><span class="index-count">2</span></button>
+          <button class="index-row"><span class="index-marker waiting"></span><span class="index-copy"><span class="index-title">音频路由恢复</span></span><span class="index-count">4</span></button>
+          <button class="index-row"><span class="index-marker"></span><span class="index-copy"><span class="index-title">Provider 发现协议</span></span><span class="index-count">2</span></button>
+          <button class="index-row"><span class="index-marker"></span><span class="index-copy"><span class="index-title">安全边界收口</span></span><span class="index-count">1</span></button>
+        </nav>
+        <p class="index-note">这里仅用于定位工作线。点击后滚动到右侧同一主题，不打开详情，也不改变目录顺序。</p>
+      </aside>
+
+      <main class="reading">
+        <div class="reading-inner">
+          <section class="topic">
+            <header class="topic-header">
+              <div class="topic-heading"><span class="dot decision"></span><div><h1 class="topic-title">SessionMap 信息架构</h1><div class="topic-summary">让用户从工作线进入 session，并在原地找回因果位置</div></div></div>
+              <div class="topic-actions"><span class="state-word">等你拍板</span><button class="overview">主题全貌</button></div>
+            </header>
+
+            <div class="sessions">
+              <article class="session open">
+                <div class="session-row">
+                  <div class="session-main">
+                    <div class="session-title"><span class="provider">CODEX</span>确定主题与 session 的脉络归属</div>
+                    <div class="progress">完整轨迹跟主题走；session 保留可修订的局部恢复视角</div>
+                    <div class="context"><span>sessionmap</span><span>main</span><span>今天 14:02 创建</span><span>刚刚更新</span></div>
+                  </div>
+                  <div class="session-side"><span class="session-status">等你确认</span><button class="disclose">收起脉络</button><button class="jump">回到终端</button></div>
+                </div>
+                <div class="trail" aria-label="Session 因果脉络">
+                  <div class="trail-head">本次脉络 · 4 个因果路标</div>
+                  <div class="trail-item"><span class="trail-kind">起点</span><span>问题被定义为：脉络应跟主题还是跟 session</span></div>
+                  <div class="trail-item"><span class="trail-kind">判断</span><span>session 是情景入口，主题才是跨 session 的语义连续体</span></div>
+                  <div class="trail-item dead"><span class="trail-kind">排除</span><span>不建立 session 自有历史树 <span class="because">— 会复制事实并割裂工作线</span></span></div>
+                  <div class="trail-item current"><span class="trail-kind">当前方向</span><span>主题拥有历史，session 提供 2–6 个可修订因果路标</span></div>
+                </div>
+              </article>
+
+              <article class="session">
+                <div class="session-row">
+                  <div class="session-main">
+                    <div class="session-title"><span class="provider">CLAUDE</span>重构 Web 地图读取层</div>
+                    <div class="progress">主题 section 与稳定 session 目录已经接入读取模型</div>
+                    <div class="context"><span>sessionmap</span><span>ui-reading-layer</span><span>昨天创建</span><span>18 分钟前更新</span></div>
+                  </div>
+                  <div class="session-side"><span class="session-status busy">运行中</span><button class="disclose">脉络 5</button><button class="jump">回到终端</button></div>
+                </div>
+              </article>
+
+              <article class="session">
+                <div class="session-row">
+                  <div class="session-main">
+                    <div class="session-title"><span class="provider">CODEX</span>验证滚动与展开的空间稳定性</div>
+                    <div class="progress">resize 后仍需钉住触发 session 行，避免阅读位置漂移</div>
+                    <div class="context"><span>sessionmap</span><span>main</span><span>7 月 18 日创建</span><span>昨天更新</span></div>
+                  </div>
+                  <div class="session-side"><span class="session-status">终端已关闭</span><button class="disclose">脉络 4</button><button class="jump">恢复</button></div>
+                </div>
+              </article>
+            </div>
+          </section>
+
+          <section class="topic secondary">
+            <header class="topic-header">
+              <div class="topic-heading"><span class="dot busy"></span><div><h2 class="topic-title">发布安装链路</h2><div class="topic-summary">统一 standalone CLI、App 壳与 pkg 安装事务</div></div></div>
+              <div class="topic-actions"><span class="state-word" style="color:var(--busy)">运行中</span><button class="overview">主题全貌</button></div>
+            </header>
+            <div class="sessions">
+              <article class="session">
+                <div class="session-row">
+                  <div class="session-main"><div class="session-title"><span class="provider">CODEX</span>验证 universal pkg 安装冒烟</div><div class="progress">签名产物已生成，正在检查 launchd 重启恢复</div><div class="context"><span>sessionmap</span><span>release</span><span>今天创建</span></div></div>
+                  <div class="session-side"><span class="session-status busy">运行中</span><button class="disclose">脉络 3</button><button class="jump">回到终端</button></div>
+                </div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+</body>
+</html>

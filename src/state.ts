@@ -12,7 +12,7 @@ import {
   writeSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { dlopen } from "bun:ffi";
 import {
   APP_NAME,
@@ -32,6 +32,10 @@ import { Logger } from "./logger.ts";
 import type {
   AskKind,
   EngineName,
+  HistoryImportItem,
+  HistoryItemStatus,
+  HistoryJobStatus,
+  IntakePhase,
   OffsetRecord,
   Provider,
   SessionRecord,
@@ -50,6 +54,9 @@ import {
 } from "./utils.ts";
 
 const SESSION_STATUSES: SessionStatus[] = ["busy", "idle", "recent", "closed", "unknown"];
+const INTAKE_PHASES: IntakePhase[] = ["awaiting-choice", "importing", "complete"];
+const HISTORY_JOB_STATUSES: HistoryJobStatus[] = ["running", "paused", "complete", "cancelled"];
+const HISTORY_ITEM_STATUSES: HistoryItemStatus[] = ["pending", "running", "complete", "skipped", "failed"];
 
 export function createEmptyState(engine: EngineName = "claude", at = nowIso()): TrailState {
   return {
@@ -62,9 +69,27 @@ export function createEmptyState(engine: EngineName = "claude", at = nowIso()): 
     mainlineIndex: {},
     sessions: {},
     offsets: {},
+    excludedSessions: {},
+    intake: {
+      phase: "awaiting-choice",
+      coverageStartAt: null,
+      lastDiscoveryAt: null,
+      imported: {},
+      job: null,
+    },
     archived: [],
     engine,
   };
+}
+
+export function containingGitWorktree(path: string): string | null {
+  let current = resolve(path);
+  while (true) {
+    if (existsSync(join(current, ".git"))) return current;
+    const parent = dirname(current);
+    if (parent === current) return null;
+    current = parent;
+  }
 }
 
 function validIso(value: unknown, fallback: string): string {
@@ -329,6 +354,94 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
     state.offsets[key] = record;
   }
 
+  const rawExcludedSessions = isRecord(input.excludedSessions) ? input.excludedSessions : {};
+  if (rawExcludedSessions !== input.excludedSessions) repaired = true;
+  for (const [key, value] of Object.entries(rawExcludedSessions)) {
+    if (!key || key.length > 320 || typeof value !== "string") {
+      repaired = true;
+      continue;
+    }
+    state.excludedSessions[key] = validIso(value, at);
+  }
+
+  const durableObjectsExist = state.roots.length > 0
+    || Object.keys(state.sessions).length > 0
+    || Object.keys(state.offsets).length > 0
+    || Object.keys(state.excludedSessions).length > 0;
+  const rawIntake = isRecord(input.intake) ? input.intake : null;
+  if (!rawIntake) {
+    state.intake.phase = durableObjectsExist ? "complete" : "awaiting-choice";
+    repaired = true;
+  } else {
+    state.intake.phase = enumValue(INTAKE_PHASES, rawIntake.phase, durableObjectsExist ? "complete" : "awaiting-choice");
+    state.intake.coverageStartAt = typeof rawIntake.coverageStartAt === "string"
+      ? validIso(rawIntake.coverageStartAt, at)
+      : null;
+    state.intake.lastDiscoveryAt = typeof rawIntake.lastDiscoveryAt === "string"
+      ? validIso(rawIntake.lastDiscoveryAt, at)
+      : null;
+    const imported = isRecord(rawIntake.imported) ? rawIntake.imported : {};
+    for (const [key, value] of Object.entries(imported)) {
+      if (!key || key.length > 320 || typeof value !== "string") {
+        repaired = true;
+        continue;
+      }
+      state.intake.imported[key] = validIso(value, at);
+    }
+    const rawJob = isRecord(rawIntake.job) ? rawIntake.job : null;
+    if (rawJob) {
+      const id = typeof rawJob.id === "string" && rawJob.id.length <= 160 ? rawJob.id : crypto.randomUUID();
+      const items: Record<string, HistoryImportItem> = {};
+      const rawItems = isRecord(rawJob.items) ? rawJob.items : {};
+      for (const [key, raw] of Object.entries(rawItems)) {
+        if (!isRecord(raw) || !key || key.length > 320) {
+          repaired = true;
+          continue;
+        }
+        const path = typeof raw.path === "string" ? raw.path : "";
+        const sessionId = typeof raw.sessionId === "string" ? raw.sessionId : "";
+        if (!path || !sessionId) {
+          repaired = true;
+          continue;
+        }
+        const item: HistoryImportItem = {
+          key,
+          provider: enumValue(PROVIDERS, raw.provider, "claude") as Provider,
+          sessionId,
+          path,
+          kind: raw.kind === "snapshot" ? "snapshot" : "append",
+          plannedSize: Math.floor(finiteNonnegative(raw.plannedSize)),
+          plannedMtimeMs: finiteNonnegative(raw.plannedMtimeMs),
+          cursor: Math.floor(finiteNonnegative(raw.cursor)),
+          status: enumValue(HISTORY_ITEM_STATUSES, raw.status, "pending"),
+          reconcile: raw.reconcile === true,
+        };
+        if (raw.skipUntilNewline === true) item.skipUntilNewline = true;
+        const error = optionalString(raw, "error");
+        if (error) item.error = truncateChars(error, 400);
+        items[key] = item;
+      }
+      state.intake.job = {
+        id,
+        createdAt: validIso(rawJob.createdAt, at),
+        cutoffAt: validIso(rawJob.cutoffAt, at),
+        highWaterAt: validIso(rawJob.highWaterAt, at),
+        status: enumValue(HISTORY_JOB_STATUSES, rawJob.status, "paused"),
+        items,
+      };
+      if (state.intake.phase === "importing" && state.intake.job.status === "complete") {
+        state.intake.phase = "complete";
+        repaired = true;
+      }
+    } else if (rawIntake.job !== null && rawIntake.job !== undefined) {
+      repaired = true;
+    }
+    if (state.intake.phase === "importing" && !state.intake.job) {
+      state.intake.phase = durableObjectsExist ? "complete" : "awaiting-choice";
+      repaired = true;
+    }
+  }
+
   if (input.schemaVersion !== SCHEMA_VERSION) repaired = true;
   state.schemaVersion = SCHEMA_VERSION;
   return { state, repaired };
@@ -343,6 +456,10 @@ export class StateStore {
     readonly directory: string,
     readonly logger = new Logger(join(directory, "server.log")),
   ) {
+    const worktree = containingGitWorktree(directory);
+    if (worktree) {
+      throw new Error(`SessionMap state directory must stay outside Git worktrees: ${worktree}`);
+    }
     this.statePath = join(directory, "state.json");
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     chmodSync(directory, 0o700);

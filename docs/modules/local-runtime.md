@@ -17,6 +17,8 @@
 ## 不变量
 
 - 浏览器、installed Web App、macOS 壳、CLI 与 watcher 共享一个 Bun 服务和一个状态文件。
+- 所有 CLI 入口都复用 StateStore 的仓库外路径门禁；`--state-dir` 指向任意 Git worktree 内部
+  时必须在创建文件前失败，不能把真实地图状态当作项目 fixture。
 - 默认只监听 `127.0.0.1`；不得把“网页可多端”解释为自动开放局域网访问。
 - 同一用户在本机任意现代浏览器、任意 profile 或新标签页直接打开
   `http://127.0.0.1:4317/`，都能读取唯一服务中的同一份真实状态；读取不得依赖某个 tab
@@ -31,6 +33,11 @@
 - open ticket 失效只影响 CLI 的打开回执，不得阻断页面直接读取；网络中断与服务短暂
   重启使用“暂时无法刷新”，并保留最后一次成功渲染。
 - launchd 保持单 writer；新服务健康前不得移除旧服务入口。
+- `/api/snapshot` 返回同一耐久 intake 投影；`/api/intake/check|start|pause|resume|cancel`
+  只接受回环同源 JSON POST，并由同一个 watcher/coordinator 写入同一状态文件。页面刷新
+  只重读 snapshot，不创建导入任务；后台 watcher 生命周期不依赖页面是否打开。
+- `/api/session/delete` 只接受回环同源 JSON POST，经 TreeRuntime 单写者删除本地记录并写入
+  排除标记；服务不得把它实现成 transcript 文件删除或客户端旁路写状态。
 - macOS 壳发现服务不可用时只能调用同一 CLI install 事务；不得自己运行 `serve`、生成
   plist 或读取状态。窗口关闭、重开和壳崩溃不影响后台。
 - macOS Terminal/iTerm/Orca 集成只是动作适配层，不构成第二个产品客户端。

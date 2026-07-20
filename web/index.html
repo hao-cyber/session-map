@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
     <meta name="color-scheme" content="light" />
-    <meta name="theme-color" content="#f7f7f8" />
+    <meta name="theme-color" content="#f5f3ed" />
     <title>SessionMap — agent thinking map</title>
     <link rel="icon" href="/assets/sessionmap-icon.svg?v=__SESSIONMAP_ASSET_VERSION__" type="image/svg+xml" />
     <link rel="manifest" href="/assets/manifest.webmanifest?v=__SESSIONMAP_ASSET_VERSION__" />
@@ -40,18 +40,16 @@
         }, 1800);
       });
     </script>
-    <script defer src="/assets/vendor/d3.min.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
     <script defer src="/assets/vendor/markmap-lib.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
-    <script defer src="/assets/vendor/markmap-view.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
     <script defer src="/assets/app.js?v=__SESSIONMAP_ASSET_VERSION__"></script>
   </head>
   <body>
     <header class="topbar" aria-label="SessionMap 状态栏">
       <div class="brand-block">
-        <div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>
+        <img class="brand-mark" src="/assets/brand-mark.svg?v=__SESSIONMAP_ASSET_VERSION__" alt="" />
         <div>
           <strong>SessionMap</strong>
-          <span id="status-line">正在读取工作线…</span>
+          <span class="status-row"><span id="status-line">正在读取工作线…</span><button id="check-now-button" type="button">立即检查</button></span>
         </div>
       </div>
       <div id="git-chips" class="git-chips" aria-label="有例外的工作目录"></div>
@@ -60,6 +58,7 @@
           <span class="icon icon-archive" aria-hidden="true"></span>
           <span id="archived-count">已归档 0</span>
         </button>
+        <button id="history-button" class="quiet-button" type="button" hidden>补扫历史</button>
         <label class="engine-control">
           <span>Roll</span>
           <select id="engine-select" aria-label="Roll 引擎"></select>
@@ -67,10 +66,65 @@
       </div>
     </header>
 
-    <section id="now-bar" class="now-bar" aria-label="现在该看哪"></section>
-
     <main id="map-shell" tabindex="-1">
-      <div id="directory" class="directory" role="region" aria-label="主题与 Session 目录"></div>
+      <div class="map-layout">
+        <aside class="topic-index" aria-label="待处理与工作线目录">
+          <section class="attention-index" aria-labelledby="attention-index-title">
+            <div class="topic-index-head">
+              <span id="attention-index-title">待处理</span>
+              <span id="attention-index-count">0</span>
+            </div>
+            <div id="attention-index-list"></div>
+          </section>
+          <section class="workline-index">
+            <div class="topic-index-head">
+              <span>工作线</span>
+              <span id="topic-index-count">0</span>
+            </div>
+            <nav id="topic-index-list" aria-label="按工作线跳转"></nav>
+          </section>
+        </aside>
+        <div class="map-content">
+          <section id="intake-panel" class="intake-panel" aria-live="polite" hidden>
+            <div id="intake-choice">
+              <div class="intake-heading">
+                <div><span class="eyebrow">首次使用</span><h1>把最近的工作带进 SessionMap</h1></div>
+                <span id="intake-discovery-state" class="intake-local-state">本机发现完成</span>
+              </div>
+              <p class="intake-lead">新对话会从现在起持续整理。你也可以把本机已有的 agent session 带进地图，直接从熟悉的工作继续。</p>
+              <div class="intake-promises"><span>transcript 始终只读</span><span>只在本机发现 session</span><span>以后可继续补扫</span></div>
+              <div id="intake-provider-summary" class="intake-provider-summary"></div>
+              <div id="intake-ranges" class="intake-ranges" role="group" aria-label="历史回扫范围"></div>
+              <label id="intake-custom" class="intake-custom" hidden>回溯到这一天活跃过的 session <input id="intake-custom-date" type="date" /></label>
+              <div class="intake-metrics">
+                <div><strong id="intake-session-count">0 个 session</strong><span>完整对话，按时间顺序</span></div>
+                <div><strong id="intake-size-estimate">本机计算中</strong><span>可关闭页面，后台继续</span></div>
+                <div><strong>从现在持续整理</strong><span>不受历史范围影响</span></div>
+              </div>
+              <p class="intake-explain">范围按 session 的最近活动判断；命中的 session 会从开头读取。已整理内容不会因以后改变范围而删除或重做。</p>
+              <div class="intake-actions">
+                <button id="intake-start" class="intake-primary" type="button">开始整理</button>
+                <button id="intake-skip" class="intake-secondary" type="button">不导入历史</button>
+                <button id="intake-recheck" class="intake-secondary" type="button">重新检查</button>
+                <span id="intake-engine-note">正文仅交给当前 Roll 引擎</span>
+              </div>
+            </div>
+            <div id="intake-progress" hidden>
+              <div class="intake-heading"><div><span class="eyebrow">历史回扫</span><h1 id="intake-progress-title">正在把近期工作整理成地图</h1></div><span id="intake-job-state" class="intake-local-state">自动继续</span></div>
+              <p id="intake-progress-copy" class="intake-lead">完成的工作线会立即出现在下方目录。</p>
+              <div class="intake-progress-row"><div class="intake-progress-track"><i id="intake-progress-fill"></i></div><span id="intake-progress-count">0 / 0</span></div>
+              <div id="intake-current" class="intake-current"></div>
+              <div class="intake-actions">
+                <button id="intake-pause" class="intake-secondary" type="button">暂停</button>
+                <button id="intake-resume" class="intake-primary" type="button" hidden>继续整理</button>
+                <button id="intake-cancel" class="intake-secondary" type="button">取消剩余导入</button>
+                <button id="intake-show-map" class="intake-primary" type="button">先看地图</button>
+              </div>
+            </div>
+          </section>
+          <div id="directory" class="directory" role="region" aria-label="主题与 Session 目录"></div>
+        </div>
+      </div>
       <div id="loading" class="loading-state">
         <span class="busy-dot"></span>
         <span>重建主题与 Session 目录</span>

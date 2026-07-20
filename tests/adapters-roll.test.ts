@@ -124,6 +124,17 @@ describe("transcript adapters", () => {
     expect(after.nextOffset).toBe(statSync(path).size);
   });
 
+  test("can consume an unterminated final line at a fixed history boundary", () => {
+    const { path } = fixture();
+    writeFileSync(path, JSON.stringify({ type: "user", sessionId: "history-final", message: { role: "user", content: "历史末行" } }));
+    const delta = readTranscriptDelta(path, "claude", {
+      endOffset: statSync(path).size,
+      includeFinalLine: true,
+    });
+    expect(delta.text).toContain("历史末行");
+    expect(delta.nextOffset).toBe(statSync(path).size);
+  });
+
   test("skips a giant unterminated line and remembers newline recovery", () => {
     const { path } = fixture();
     writeFileSync(path, "x".repeat(GIANT_LINE_BYTES + 10));

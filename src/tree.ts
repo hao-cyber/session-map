@@ -11,6 +11,7 @@ import {
 import type {
   ApplyResult,
   AskKind,
+  DeleteSessionResult,
   RollOutput,
   SessionRecord,
   SessionSnapshot,
@@ -38,6 +39,18 @@ function subtreeIds(state: TrailState, rootId: string): Set<string> {
     stack.push(...state.nodes[id].children);
   }
   return result;
+}
+
+export function sessionIdentity(provider: SessionRecord["provider"], sessionId: string): string {
+  return `${provider}:${sessionId}`;
+}
+
+export function sessionIsExcluded(
+  state: Pick<TrailState, "excludedSessions">,
+  provider: SessionRecord["provider"],
+  sessionId: string,
+): boolean {
+  return Boolean(state.excludedSessions[sessionIdentity(provider, sessionId)]);
 }
 
 function makeNode(parent: string | null, type: TrailNode["type"], label: string, at: string): TrailNode {
@@ -116,6 +129,9 @@ export class TreeRuntime {
 
   async applyRoll(meta: TranscriptMeta, rawOutput: RollOutput): Promise<ApplyResult> {
     return this.store.update((state) => {
+      if (sessionIsExcluded(state, meta.provider, meta.sessionId)) {
+        return { mainline: "", rootId: "", reattached: false, accepted: 0, rejected: ["session is excluded"] };
+      }
       const at = nowIso();
       const mainline = canonicalMainline(rawOutput.mainline);
       if (!mainline) throw new Error("roll output has an empty mainline");
@@ -310,6 +326,50 @@ export class TreeRuntime {
       if (!state.roots.includes(rootId)) return false;
       state.archived = state.archived.filter((id) => id !== rootId);
       return true;
+    });
+  }
+
+
+  async deleteSession(sessionId: string): Promise<DeleteSessionResult> {
+    return this.store.update((state) => {
+      const session = state.sessions[sessionId];
+      if (!session) return { ok: false, removedRoot: false, remainingSessions: 0 };
+      const identity = sessionIdentity(session.provider, session.id);
+      state.excludedSessions[identity] = nowIso();
+      delete state.sessions[sessionId];
+      for (const [path, offset] of Object.entries(state.offsets)) {
+        if (offset.provider === session.provider && offset.sessionId === session.id) delete state.offsets[path];
+      }
+      delete state.intake.imported[identity];
+      const job = state.intake.job;
+      if (job) {
+        for (const [key, item] of Object.entries(job.items)) {
+          if (item.provider === session.provider && item.sessionId === session.id) delete job.items[key];
+        }
+        const pending = Object.values(job.items).some((item) =>
+          item.status === "pending" || item.status === "running" || item.status === "failed"
+        );
+        if (!pending && (job.status === "running" || job.status === "paused")) {
+          job.status = "complete";
+          state.intake.phase = "complete";
+        }
+      }
+
+      const rootId = session.rootId;
+      const remainingSessions = rootId
+        ? Object.values(state.sessions).filter((candidate) => candidate.rootId === rootId).length
+        : 0;
+      if (!rootId || remainingSessions > 0 || !state.nodes[rootId]) {
+        return { ok: true, removedRoot: false, remainingSessions };
+      }
+      const ids = subtreeIds(state, rootId);
+      for (const id of ids) delete state.nodes[id];
+      state.roots = state.roots.filter((id) => id !== rootId);
+      state.archived = state.archived.filter((id) => id !== rootId);
+      for (const [name, id] of Object.entries(state.mainlineIndex)) {
+        if (id === rootId) delete state.mainlineIndex[name];
+      }
+      return { ok: true, removedRoot: true, remainingSessions: 0 };
     });
   }
 }

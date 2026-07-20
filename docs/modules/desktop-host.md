@@ -11,7 +11,7 @@
 - `web/manifest.webmanifest`、`web/sessionmap-icon.svg`：浏览器安装 metadata 与本地图标。
 - `desktop/macos/SessionMapApp.swift`、`desktop/macos/Info.plist`：AppKit/WKWebView 极薄壳。
 - `scripts/build-macos-app.ts`：原生架构或 universal App bundle 构建、图标和本地签名。
-- `src/now.ts`、`src/cli.ts`：Now 条的只读终端投影与编号跳转入口。
+- `src/now.ts`、`src/cli.ts`：行动优先级的只读终端投影与编号跳转入口。
 - [`../decisions/0004-map-document-desktop-hosts.md`](../decisions/0004-map-document-desktop-hosts.md)：
   容器所有权、失败与回滚决策。
 
@@ -29,7 +29,7 @@
   capability、不注册 service worker、不复制离线状态；浏览器不支持安装时页面仍完整可用。
 - `sessionmap now` 复用 `buildNowItems`，只读修复投影且不落盘。`--jump N` 必须调用现有
   loopback `/api/jump`，不能在短命 CLI 中构造 ActionRouter 或成为第二写者。
-- 同一主线已有明确 ask 时，Now 不再重复显示较低优先级的 blocker/busy/recent 状态。
+- 同一主线已有明确 ask 时，行动优先级投影不再重复显示较低优先级的 blocker/busy/recent 状态。
 
 ## 失败与重启
 
@@ -47,5 +47,5 @@
   架构、签名，并随同一个 `.pkg` 公证。
 - 真实验收覆盖：Dock 冷启动、单实例 reopen、窗口位置恢复、默认不置顶、显式置顶、服务
   未运行时统一 install、服务重启后恢复、Dock reopen、外部导航不进入壳。
-- 用代表性桌面尺寸分别截取普通浏览器与 App，检查三层层级、纵向滚动、溢出、命中区、
+- 用代表性桌面尺寸分别截取普通浏览器与 App，检查主题/session/脉络层级、纵向滚动、溢出、命中区、
   披露反馈和窗口最小尺寸。截图与 QA 报告不得进入发布产物。

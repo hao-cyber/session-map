@@ -3,12 +3,35 @@ import {
   mergeRuntimeState,
   parseLsofTranscriptProcesses,
   processForSession,
+  readGitWorkspace,
   readTranscriptProcess,
   readTranscriptProcesses,
 } from "../src/monitor.ts";
 import { sessionRecord } from "./helpers.ts";
 
 describe("session monitor state merge", () => {
+  test("projects branch and worktree context without persisting Git state", async () => {
+    const calls: string[][] = [];
+    const result = await readGitWorkspace("/repo/packages/app", async (command) => {
+      calls.push(command);
+      if (command.includes("status")) return { ok: true, text: " M web/app.js\n?? notes.txt\n" };
+      if (command.includes("symbolic-ref")) return { ok: true, text: "feature/directory-ui\n" };
+      if (command.includes("rev-list")) return { ok: true, text: "2\n" };
+      if (command.includes("rev-parse")) return { ok: true, text: "/repo\n" };
+      return { ok: false, text: "" };
+    });
+
+    expect(calls).toHaveLength(4);
+    expect(result).toEqual({
+      cwd: "/repo/packages/app",
+      worktree: "/repo",
+      name: "repo",
+      branch: "feature/directory-ui",
+      dirty: 2,
+      ahead: 2,
+    });
+  });
+
   test("deletes stale runtime handles without overwriting concurrent semantics", () => {
     const current = sessionRecord("session", "/tmp/work");
     current.cursor = "new-concurrent-cursor";
