@@ -1,5 +1,62 @@
 # SessionMap
 
+[English](#english) · [中文](#中文说明)
+
+## English
+
+**SessionMap is the thinking map for coding agents.** It continuously turns local
+Claude Code, Codex, Kimi, Grok, and MiniMax session records into durable,
+theme-centered lines of thought, so you can return to any piece of work and recover
+the context in seconds.
+
+SessionMap is local-first: it runs one Bun service on `127.0.0.1`, uses vendored Web
+assets, does not include analytics or telemetry, and never writes to agent
+transcripts. Its persistent state stays outside Git worktrees on your Mac.
+
+### Install on macOS
+
+SessionMap supports macOS 13 or later on Apple Silicon and Intel Macs. Download the
+latest `SessionMap-<version>.pkg` from [GitHub Releases](https://github.com/hao-cyber/session-map/releases),
+open it with Installer, and SessionMap will install and launch automatically. The
+package and its bundled app are signed with Developer ID and notarized by Apple.
+You do not need Bun, Homebrew, or a terminal.
+
+On first launch, choose how much existing session history to import: 7, 30, or 90
+days, a custom start date, or no history. SessionMap then keeps watching new local
+sessions in the background. Semantic rolling uses a supported model CLI that is
+already installed and signed in on your Mac; Claude is the default, with Codex,
+Kimi, and Grok offered when available.
+
+After installation, open the app or visit `http://127.0.0.1:4317/` in any local
+browser. Both show the same persistent map.
+
+### Command-line usage
+
+```bash
+sessionmap status               # Show service and persistent-state status
+sessionmap open                 # Open the map and verify the first rendered frame
+sessionmap now                  # List work that needs attention; use --jump N
+sessionmap once                 # Process one round of transcript updates
+sessionmap install              # Install or repair the user launchd service
+sessionmap uninstall            # Remove the launchd service
+sessionmap demo                 # Create a synthetic demo without real transcripts
+```
+
+Developers can run the current source with Bun 1.3.13 or later:
+
+```bash
+git clone https://github.com/hao-cyber/session-map.git
+cd session-map
+bun install --frozen-lockfile
+bun run start
+```
+
+See the [product and design charter](docs/product-design.md),
+[architecture](docs/architecture.md), [contributing guide](CONTRIBUTING.md), and
+[security policy](SECURITY.md) for the full contracts.
+
+## 中文说明
+
 > 当人同时驱动多个 AI Agent，真正稀缺的已经不是算力，而是人的注意力连续性。
 
 终端和 session 记录了发生过什么，却没有保存：为什么走到这里、试过什么、否定了什么、做了什么决定、现在卡在哪里。
@@ -29,10 +86,9 @@ SessionMap 是本机 Bun 后台提供的同一份地图文档。系统浏览器�
 目前支持 macOS 13 及以上的 Apple Silicon 和 Intel Mac。普通用户从
 [GitHub Releases](https://github.com/hao-cyber/session-map/releases) 下载最新的
 `SessionMap-<版本>.pkg`，双击后系统 Installer 会自动完成安装并打开 SessionMap App；不需要
-安装 Bun、Homebrew 或使用终端。仓库保持私有测试期间，下载者需要先被授予仓库访问权限；
-公开后同一安装包链接可直接面向所有人。
+安装 Bun、Homebrew 或使用终端。安装包与内置 App 均使用 Developer ID 签名并通过 Apple 公证。
 
-仓库公开后会同时启用 Homebrew tap，开发者可以使用：
+开发者也可以通过 Homebrew tap 安装：
 
 ```bash
 brew install hao-cyber/tap/sessionmap
@@ -47,11 +103,11 @@ brew upgrade sessionmap
 sessionmap install
 ```
 
-仓库公开后，不使用安装包或 Homebrew 时也可以运行会验证 SHA-256 的安装脚本：
+不使用安装包或 Homebrew 时，也可以运行会验证 SHA-256 的安装脚本：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hao-cyber/session-map/v0.1.0-beta.1/scripts/install.sh \
-  | sh -s -- v0.1.0-beta.1
+curl -fsSL https://raw.githubusercontent.com/hao-cyber/session-map/v0.1.0-beta.2/scripts/install.sh \
+  | sh -s -- v0.1.0-beta.2
 ```
 
 安装后可在任意本机浏览器直接打开 `http://127.0.0.1:4317/`，无需先运行 `sessionmap open`

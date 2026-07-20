@@ -57,8 +57,10 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
   状态进入 awaiting-choice。未完成 job 的 cursor、imported 标记与 live offsets 必须随
   原子状态一起保留，升级与重启都不得倒退。
 - 发布产物不包含 token、QA 原始捕获、依赖目录或本机构建缓存。
-- `bun run check` 的隐私门禁拒绝跟踪 `state.json`、状态目录、截图/捕获目录、具体本机用户
-  路径和常见密钥形态；发布脚本仍只能从已跟踪源码与显式构建产物组装 archive。
+- `bun run check` 的隐私门禁扫描当前候选文件和全部可达 Git 历史，拒绝跟踪
+  `state.json`、`capability.token`、状态目录、截图/捕获目录、具体本机用户路径和常见
+  密钥形态；CI 与 Release 必须完整 checkout 历史，发布脚本仍只能从已跟踪源码与显式
+  构建产物组装 archive。
 - runtime 同时拒绝在 Git worktree 内创建状态目录；迁移与安装不得以仓库路径作为目标，
   从源头避免主题、session、脉络或快照成为待提交文件。
 - 发布生成无状态 universal App，但不生成第二服务或业务客户端；`.pkg` 仍是已签名、公证
