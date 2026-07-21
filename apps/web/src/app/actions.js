@@ -249,6 +249,17 @@
 
   archivedButton.addEventListener("click", () => { archiveDrawer.hidden = false; });
   document.getElementById("archive-close").addEventListener("click", () => { archiveDrawer.hidden = true; });
+  helpButton.addEventListener("click", () => {
+    if (!helpDialog.open) helpDialog.showModal();
+    helpClose.focus();
+  });
+  helpClose.addEventListener("click", () => helpDialog.close());
+  helpDialog.addEventListener("click", (event) => {
+    const bounds = helpDialog.getBoundingClientRect();
+    const outside = event.clientX < bounds.left || event.clientX > bounds.right ||
+      event.clientY < bounds.top || event.clientY > bounds.bottom;
+    if (outside) helpDialog.close();
+  });
 
   async function checkNow() {
     if (checkNowButton.disabled) return;

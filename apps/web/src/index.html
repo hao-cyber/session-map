@@ -46,11 +46,14 @@
   <body>
     <header class="topbar" aria-label="SessionMap 状态栏">
       <div class="brand-block">
-        <img class="brand-mark" src="/assets/brand-mark.svg?v=__SESSIONMAP_ASSET_VERSION__" alt="" />
-        <div>
-          <strong>SessionMap</strong>
-          <span class="status-row"><span id="status-line">正在读取工作线…</span><button id="check-now-button" type="button">立即检查</button></span>
-        </div>
+        <button id="help-button" class="brand-help" type="button" aria-haspopup="dialog" aria-controls="help-dialog" title="关于与帮助">
+          <img class="brand-mark" src="/assets/brand-mark.svg?v=__SESSIONMAP_ASSET_VERSION__" alt="" />
+          <span class="brand-copy">
+            <strong>SessionMap</strong>
+            <span id="status-line">正在读取工作线…</span>
+          </span>
+        </button>
+        <button id="check-now-button" type="button">立即检查</button>
       </div>
       <div id="git-chips" class="git-chips" aria-label="有例外的工作目录"></div>
       <div class="toolbar">
@@ -150,6 +153,48 @@
         <div class="say-actions"><span>⌥ + 点击 · Enter 发送 · Shift+Enter 换行</span><button type="submit"><span class="icon icon-send"></span>发送</button></div>
       </form>
     </div>
+
+    <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title">
+      <div class="help-head">
+        <div>
+          <span class="eyebrow">关于与帮助</span>
+          <h1 id="help-title">三秒找回当时的自己</h1>
+        </div>
+        <button class="icon-button" id="help-close" type="button" aria-label="关闭帮助">
+          <span class="icon icon-x" aria-hidden="true"></span>
+        </button>
+      </div>
+      <p class="help-lead">SessionMap 按工作主线整理本机 coding agent session，保留决定、失败尝试和继续工作的准确入口。</p>
+      <div class="help-grid">
+        <section aria-labelledby="help-start-title">
+          <h2 id="help-start-title">先从哪里看</h2>
+          <ol class="help-steps">
+            <li><span>1</span><div><strong>待处理</strong><p>先看等你拍板、回复、审阅或仍然卡住的工作。</p></div></li>
+            <li><span>2</span><div><strong>工作线</strong><p>主题是一级对象；Session 是主题里的执行入口。</p></div></li>
+            <li><span>3</span><div><strong>回到终端</strong><p>终端还在就聚焦；已经关闭就恢复原 session。</p></div></li>
+          </ol>
+        </section>
+        <section aria-labelledby="help-actions-title">
+          <h2 id="help-actions-title">常用操作</h2>
+          <dl class="help-actions-list">
+            <div><dt>点击主题</dt><dd>展开或收起 Sessions 目录</dd></div>
+            <div><dt>查看脉络</dt><dd>展开主题唯一的因果路径</dd></div>
+            <div><dt>双击 Session</dt><dd>执行“回到终端 / 恢复终端”</dd></div>
+            <div><dt>右键主题</dt><dd>归档；可立即撤销</dd></div>
+          </dl>
+        </section>
+      </div>
+      <section class="help-privacy" aria-labelledby="help-privacy-title">
+        <div><span class="help-local-dot" aria-hidden="true"></span><h2 id="help-privacy-title">数据留在你的控制范围内</h2></div>
+        <p>地图和状态只保存在本机；transcript 始终只读；没有 SessionMap 账户、使用情况统计或遥测。整理时，只有有界增量会交给你选择并已登录的 Roll 引擎。</p>
+      </section>
+      <section class="help-cli" aria-labelledby="help-cli-title">
+        <h2 id="help-cli-title">命令行入口</h2>
+        <div><code>sessionmap open</code><span>打开地图</span></div>
+        <div><code>sessionmap now</code><span>查看现在需要处理什么</span></div>
+        <div><code>sessionmap --help</code><span>查看全部命令</span></div>
+      </section>
+    </dialog>
 
     <div id="toast-region" class="toast-region" aria-live="polite"></div>
     <noscript>SessionMap 需要 JavaScript 来渲染本地思维树。</noscript>

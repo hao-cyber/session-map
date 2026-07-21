@@ -31,7 +31,7 @@ type Parsed = {
 };
 
 function parse(argv: string[]): Parsed {
-  let command = argv[0] && !argv[0].startsWith("-") ? argv[0] : "serve";
+  let command = argv.length === 0 ? "help" : argv[0] && !argv[0].startsWith("-") ? argv[0] : "serve";
   let directory: string | undefined;
   let port: number | undefined;
   let open = true;
@@ -76,7 +76,13 @@ function parse(argv: string[]): Parsed {
 function help(): void {
   console.log(`SessionMap ${VERSION} — persistent thinking map for parallel coding agents
 
+Getting started:
+  sessionmap install        Install or update the background service
+  sessionmap open           Open the thinking map
+  sessionmap now            See what needs attention
+
 Usage:
+  sessionmap                Show this help
   sessionmap serve [--port 4317] [--state-dir PATH] [--no-open] [--no-watch] [--browser APP]
   sessionmap open [--port 4317] [--state-dir PATH] [--browser APP]
   sessionmap now [--state-dir PATH] [--json] [--jump N] [--open]
@@ -86,7 +92,8 @@ Usage:
   sessionmap uninstall
   sessionmap status [--state-dir PATH]
 
-State defaults to ~/Library/Application Support/SessionMap. The HTTP service binds only to 127.0.0.1.
+State stays on this Mac by default at ~/Library/Application Support/SessionMap.
+The HTTP service binds only to 127.0.0.1; SessionMap has no analytics or telemetry.
 Browser aliases: chrome, safari, firefox, edge, brave, arc. Any installed macOS application name is accepted.`);
 }
 

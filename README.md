@@ -73,6 +73,7 @@ whichever option you choose.
 
 | Command | Purpose |
 |---|---|
+| `sessionmap` / `sessionmap --help` | Show getting-started guidance and every command |
 | `sessionmap open` | Open the map and verify its first rendered frame |
 | `sessionmap now` | List work needing attention; use `--jump N` to return |
 | `sessionmap status` | Inspect persistent-state status |
@@ -199,6 +200,7 @@ Claude / Codex / Kimi / Grok transcripts · MiniMax snapshots
 
 | 命令 | 作用 |
 |---|---|
+| `sessionmap` / `sessionmap --help` | 显示上手步骤与全部命令，不启动服务 |
 | `sessionmap open` | 打开地图并确认首帧成功渲染 |
 | `sessionmap now` | 一屏查看待处理工作；`--jump N` 可直接切回 |
 | `sessionmap status` | 查看持久状态摘要 |
