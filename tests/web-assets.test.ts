@@ -36,6 +36,20 @@ describe("offline browser bundle", () => {
     expect(app).not.toContain("localStorage.setItem(\"sessionmap.intake");
   });
 
+  test("opens local help from the brand without adding another product surface", () => {
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const app = readWebBundle("app");
+    const css = readWebBundle("styles");
+    expect(html).toContain('id="help-button"');
+    expect(html).toContain('aria-controls="help-dialog"');
+    expect(html).toContain('id="help-dialog"');
+    expect(html).toContain("三秒找回当时的自己");
+    expect(html).toContain("使用情况统计或遥测");
+    expect(app).toContain("helpDialog.showModal()");
+    expect(app).toContain("helpDialog.close()");
+    expect(css).toContain(".help-dialog::backdrop");
+  });
+
   test("parses the vanilla browser entry as JavaScript", () => {
     const source = readWebBundle("app");
     expect(() => new Bun.Transpiler({ loader: "js", target: "browser" }).transformSync(source)).not.toThrow();

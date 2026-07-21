@@ -41,10 +41,13 @@
 - macOS 壳发现服务不可用时只能调用同一 CLI install 事务；不得自己运行 `serve`、生成
   plist 或读取状态。窗口关闭、重开和壳崩溃不影响后台。
 - macOS Terminal/iTerm/Orca 集成只是动作适配层，不构成第二个产品客户端。
+- 裸命令 `sessionmap` 与 `sessionmap --help` 只打印上手步骤、完整命令和本地数据边界后退出；
+  只有显式 `sessionmap serve` 才启动前台服务。launchd 始终传入 `serve --no-open`，不依赖
+  裸命令的默认行为。
 
 ## 验证
 
-运行 `bun run check`，构建 standalone CLI，以隔离或真实状态目录验证 `install`、任意
+运行 `bun run check`，构建 standalone CLI，以隔离或真实状态目录验证裸命令帮助、`install`、任意
 新浏览器 tab 直接读取真实 snapshot、open ticket 一次登记、伪造/过期拒绝、首帧 ack、
 无 ack 超时、服务重启重试、`/health`、静态资产版本隔离和 launchd 重启。UI 变更仍需在真实浏览器生成代表性
 桌面截图，并至少验证默认浏览器、installed manifest 与 macOS App 入口；验收浏览器必须

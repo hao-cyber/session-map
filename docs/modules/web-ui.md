@@ -75,6 +75,9 @@ macOS 极薄壳承载同一份正式地图文档。
   CSS 引用的图标同样带版本。只有匹配当前版本的资产响应可以使用 immutable 缓存，
   无版本或版本不匹配的请求必须 `no-store`，避免新 HTML 与旧 JS 跨版本混装。
 - Web runtime 全部 vendored，不允许 CDN、远程字体、analytics 或 telemetry。
+- 工具栏品牌是同一地图文档的帮助入口：使用原生 dialog 披露阅读顺序、常用操作、隐私
+  边界与 CLI 命令。帮助内容必须随包 vendored，不请求远程内容，也不读写地图状态、主题
+  披露状态或滚动位置；关闭按钮、Escape 与遮罩点击都能返回原地图。
 - Web 源码可以按职责切片，但浏览器公开入口仍只有 `/assets/app.js` 与
   `/assets/styles.css`。组合顺序和完整 bundle hash 由 `apps/runtime/src/assets.ts` 单点拥有；开发热读、
   standalone 嵌入和测试必须使用同一清单，不得生成第二份手工 bundle。
@@ -155,3 +158,5 @@ macOS 极薄壳承载同一份正式地图文档。
 大纲与逐节点披露状态保持；首次展开只揭示当前路径。动态布局后必须按稳定 `data-node-id` 重新查询，
 不得用旧 element/locator 的结果判断交互成败。首轮验收还必须等待 `#loading[hidden]`，
 不能在目录初始渲染尚未结束时用移动中的坐标制造假失败。
+帮助入口还需验证鼠标、键盘、Escape、关闭按钮和遮罩关闭，且打开与关闭前后地图披露和
+滚动位置不变。

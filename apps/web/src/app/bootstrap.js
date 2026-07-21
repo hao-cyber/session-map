@@ -17,6 +17,9 @@
   const topicIndexList = document.getElementById("topic-index-list");
   const topicIndexCount = document.getElementById("topic-index-count");
   const loading = document.getElementById("loading");
+  const helpButton = document.getElementById("help-button");
+  const helpDialog = document.getElementById("help-dialog");
+  const helpClose = document.getElementById("help-close");
   const statusLine = document.getElementById("status-line");
   const checkNowButton = document.getElementById("check-now-button");
   const gitChips = document.getElementById("git-chips");
