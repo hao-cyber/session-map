@@ -406,6 +406,11 @@ CLI 与 universal 极薄壳的通用 macOS 安装包、校验和与来源证明�
 只能调用 `sessionmap install` 的统一事务；不得直接写用户状态、生成另一份 plist 或拥有
 第二个服务生命周期。源码构建保留给贡献者。
 
+公开 beta 采用固定日程、有变化才发布：默认分支的精确提交必须先通过 CI 和完整发布门禁，
+才可自动递增 beta、构建 Release，并在 Release 成功后同步 Homebrew Formula。没有源代码
+变化时不制造空版本；任何自动化失败都不能用移动 tag、跳过签名公证或让 tap 自行构建来
+伪装成成功。版本发布自动化不改变客户端默认离线、显式升级的产品边界。
+
 发布链对 CLI、极薄 App 和 Installer package 使用对应的 Developer ID 证书并提交 Apple
 公证，避免把 Gatekeeper 绕过步骤转嫁给普通用户。Electron 与拥有业务逻辑的原生客户端
 仍不属于产品路线；任何新增分发渠道都只能承载同一 CLI 和地图文档，不能引入第二套状态、

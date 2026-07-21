@@ -16,17 +16,28 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 - `scripts/macos/`：安装包架构选择、最小权限 postinstall 和 runtime 签名权限。
 - `.github/workflows/ci.yml`：类型、测试、Web 与 CLI 构建门禁。
 - `.github/workflows/release.yml`：tag/version 校验、双架构原生构建、签名、公证、冒烟、
-  来源证明和 GitHub Release 发布。
+  来源证明、GitHub Release 发布和成功后的 Homebrew tap 同步。
+- `.github/workflows/daily-release.yml`：每天检查已通过 CI 的 `main`，有新源提交时递增 beta、
+  创建不可变版本 tag 并显式 dispatch Release workflow。
+- `scripts/prepare-release-version.ts`、`scripts/update-homebrew-formula.ts`：受测试约束的 beta
+  递增与 Formula URL/SHA 确定性投影。
 - [`../decisions/0001-standalone-release-channels.md`](../decisions/0001-standalone-release-channels.md)：
   发布渠道、升级所有权与备选方案决策。
 - [`../decisions/0004-map-document-desktop-hosts.md`](../decisions/0004-map-document-desktop-hosts.md)：
   App 只承载同一地图文档的边界。
+- [`../decisions/0015-daily-tested-release-automation.md`](../decisions/0015-daily-tested-release-automation.md)：
+  每日版本切割、tag 身份、Release dispatch 与 tap 最小权限同步。
 
 ## 发布契约
 
 - 正式支持 macOS 13 及以上的 Apple Silicon 与 Intel Mac。arm64 使用
   `bun-darwin-arm64`；x86_64 使用兼容旧 Intel CPU 的 `bun-darwin-x64-baseline`。
 - Git tag、`package.json` 和 CLI `--version` 必须一致，tag 格式为 `v<semver>`。
+- 每天 Asia/Shanghai 22:00 检查一次 `main`，也可手动触发；只有精确 HEAD 已通过 CI、再次
+  通过 `check:ci` 且不同于最近 Release 的 `Release-Source` 时才发布，不创建空版本。
+  自动化只递增既有 `vX.Y.Z-beta.N` 的 `N`；stable 或版本线变化必须人工裁决。
+- 自动版本提交只由 tag 持有，以 `main` HEAD 为父提交，只修改根 `package.json` 并记录
+  `Release-Source` trailer；不得为了自动发版绕过受保护的 `main`。
 - GitHub Release 是 binary 唯一事实源。产物包含
   `sessionmap-<version>-darwin-{arm64,x86_64}.tar.gz`、自动选择本机架构的
   `SessionMap-<version>.pkg`、`checksums.txt` 和安装脚本；公开仓库发布同时生成 GitHub
@@ -38,8 +49,9 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 - 安装包安装系统级只读来源 binary 和 universal `/Applications/SessionMap.app`，并以当前
   控制台用户调用 `sessionmap install` 后打开 App；状态、plist、迁移、健康确认与回滚仍
   只有 CLI 一个所有者。App 不内嵌第二份 runtime。
-- Homebrew Formula 只安装 Release 中的 binary，不使用 `brew services`。安装和每次升级后
-  都由用户显式运行 `sessionmap install`。
+- Homebrew Formula 只安装 Release 中的 binary，不使用 `brew services`。Release 成功后，
+  workflow 从同一 `checksums.txt` 生成两个架构的 URL/SHA，经仅能写 tap 仓库的 deploy key
+  自动同步；安装和每次升级后仍由用户显式运行 `sessionmap install`。
 - 不后台检查或自动安装更新。降级时安装指定旧版本并再次运行同一 `install` 事务，用户
   状态不随 binary 降级而删除；跨 schema 降级必须由对应版本的迁移兼容性证据另行裁决。
 
@@ -69,6 +81,8 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 - 发布生成无状态 universal App，但不生成第二服务或业务客户端；`.pkg` 仍是已签名、公证
   的安装适配层，系统集成由 CLI 的 `install` 命令完成。
 - 两个架构中任一构建、安装、健康、重启、签名或公证验证失败时不得创建 Release。
+- tag 已创建但 workflow dispatch 失败时，只能重试同一个经 manifest 验证的 tag，不能移动
+  或覆盖；Release 失败不更新 tap，tap 失败只重跑 tap job，不改写已发布资产。
 
 ## 验证
 
@@ -79,4 +93,5 @@ CLI 做 `--version`、架构、`install`、`/health` 和 launchd 重启冒烟；
 公证票据和 Gatekeeper assessment；生成 SHA-256 与 provenance；并比较迁移前后 roots、
 nodes、sessions、offsets、engine 与归档集合。发布后从 `.pkg`、GitHub CLI archive 和
 Homebrew tap 分别做一次净安装，确认服务健康、页面可直接打开、tag、Release target 与
-远端一致。
+远端一致。自动化另需验证无变化跳过、beta 递增、未发布 tag 重试、Formula 确定性输出、
+`brew style` 与 `brew audit --strict --online`。
