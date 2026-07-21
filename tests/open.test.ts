@@ -5,7 +5,7 @@ import {
   OPEN_ACK_TIMEOUT_MS,
   openSessionMap,
   verifyOpenTicket,
-} from "../src/open.ts";
+} from "@sessionmap/runtime/open.ts";
 
 const TOKEN = "a".repeat(43);
 

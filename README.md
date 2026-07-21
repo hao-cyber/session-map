@@ -1,94 +1,45 @@
-# SessionMap
+<h1 align="center">SessionMap</h1>
 
-[English](#english) · [中文](#中文说明)
+<p align="center"><strong>The thinking map for coding agents.</strong><br />See the work behind your local agent sessions, then pick up any thread without reconstructing it from terminal history.</p>
+
+<p align="center">
+  <a href="https://github.com/hao-cyber/session-map/releases"><img alt="GitHub Release downloads" src="https://img.shields.io/github/downloads/hao-cyber/session-map/total?label=release%20downloads&amp;color=6f55c7" /></a>
+  <a href="https://formulae.brew.sh/analytics/install-on-request/30d/"><img alt="Homebrew install requests in the last 30 days" src="https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fformulae.brew.sh%2Fapi%2Fanalytics%2Finstall-on-request%2F30d.json&amp;search=%5C%22formula%5C%22%3A%5C%22hao-cyber%2Ftap%2Fsessionmap%5C%22%2C%5C%22count%5C%22%3A%5C%22%28%5B%5E%5C%22%5D%2B%29%5C%22&amp;replace=%241&amp;label=brew+requests+%2830d%29&amp;color=9A5B00&amp;cacheSeconds=86400" /></a>
+</p>
+
+<p align="center"><a href="#english">English</a> · <a href="#中文">中文</a> · <a href="#快速安装">安装</a> · <a href="docs/product-design.md">产品宪章</a></p>
+
+---
 
 ## English
 
-**SessionMap is the thinking map for coding agents.** It continuously turns local
-Claude Code, Codex, Kimi, Grok, and MiniMax session records into durable,
-theme-centered lines of thought, so you can return to any piece of work and recover
-the context in seconds.
+Open enough coding-agent sessions and the terminals stop telling the whole story.
+SessionMap organizes local Claude Code, Codex, Kimi, Grok, and MiniMax sessions by
+the work they belong to. It keeps the decisions, failed attempts, and exact place
+to resume after a session ends.
 
-SessionMap is local-first: it runs one Bun service on `127.0.0.1`, uses vendored Web
-assets, does not include analytics or telemetry, and never writes to agent
-transcripts. Its persistent state stays outside Git worktrees on your Mac.
+### What stays with you
+
+- **The work, not a session dashboard.** Each theme holds one continuing line of
+  thought. Sessions are durable entry points within it.
+- **Decisions keep their history.** New evidence can replace an old judgment, but
+  the earlier path—and why it changed—stays visible.
+- **A way back that does not guess.** SessionMap focuses a live terminal when it
+  can verify one. Otherwise it resumes the original provider, session ID, and cwd.
+- **Everything stays local.** One Bun service listens on `127.0.0.1`. There is no
+  SessionMap account, analytics, telemetry, CDN, or transcript write-back.
 
 ### Install on macOS
 
-SessionMap supports macOS 13 or later on Apple Silicon and Intel Macs. Download the
-latest `SessionMap-<version>.pkg` from [GitHub Releases](https://github.com/hao-cyber/session-map/releases),
-open it with Installer, and SessionMap will install and launch automatically. The
-package and its bundled app are signed with Developer ID and notarized by Apple.
-You do not need Bun, Homebrew, or a terminal.
+SessionMap supports macOS 13 or later on Apple Silicon and Intel Macs.
 
-On first launch, choose how much existing session history to import: 7, 30, or 90
-days, a custom start date, or no history. SessionMap then keeps watching new local
-sessions in the background. Semantic rolling uses a supported model CLI that is
-already installed and signed in on your Mac; Claude is the default, with Codex,
-Kimi, and Grok offered when available.
+**Recommended:** download the latest signed and notarized
+[`SessionMap-<version>.pkg`](https://github.com/hao-cyber/session-map/releases).
+Open it with Installer; it installs the service and launches the app. No terminal,
+Homebrew, or Bun is required.
 
-After installation, open the app or visit `http://127.0.0.1:4317/` in any local
-browser. Both show the same persistent map.
-
-### Command-line usage
-
-```bash
-sessionmap status               # Show service and persistent-state status
-sessionmap open                 # Open the map and verify the first rendered frame
-sessionmap now                  # List work that needs attention; use --jump N
-sessionmap once                 # Process one round of transcript updates
-sessionmap install              # Install or repair the user launchd service
-sessionmap uninstall            # Remove the launchd service
-sessionmap demo                 # Create a synthetic demo without real transcripts
-```
-
-Developers can run the current source with Bun 1.3.13 or later:
-
-```bash
-git clone https://github.com/hao-cyber/session-map.git
-cd session-map
-bun install --frozen-lockfile
-bun run start
-```
-
-See the [product and design charter](docs/product-design.md),
-[architecture](docs/architecture.md), [contributing guide](CONTRIBUTING.md), and
-[security policy](SECURITY.md) for the full contracts.
-
-## 中文说明
-
-> 当人同时驱动多个 AI Agent，真正稀缺的已经不是算力，而是人的注意力连续性。
-
-终端和 session 记录了发生过什么，却没有保存：为什么走到这里、试过什么、否定了什么、做了什么决定、现在卡在哪里。
-
-SessionMap 把 Claude Code、Codex 等 coding agent 散落的对话持续整理成一棵以工作主线为核心的外置思维树。Session 可以结束，思路不会丢；死路也不会被遗忘。它最终只解决一个问题：**让人切回任何一条工作线时，3 秒找回当时的自己。**
-
-SessionMap 不是 session 看板。一级对象是一件正在推进的工作，不是终端、进程或对话。Session 只是只读数据源和落在树上的光标：旧 session 结束后树仍然存在，新 session 可以继续生长同一条主线。
-
-完整产品理念、交互裁决顺序与视觉标准见 [产品与设计宪章](docs/product-design.md)。实现边界见 [架构说明](docs/architecture.md)。
-
-## 核心差异
-
-- **展示思考结构，而不是活动卡片。** goal、task、attempt、finding、blocker、decision、note 与死路会作为结构永久保留。
-- **用模型判断语义归属。** session 是否继续已有主线、哪里发生转折、用户正在被要求做什么，都由 roll 模型判断；cwd、关键词和正则不能替代这些判断。
-- **对象恒存。** 工作线和 session 入口不会被后台静默清理；终端关闭后，同一入口会变成 resume 动作。用户仍可明确删除某条 SessionMap session 记录并阻止再次加工。
-- **有界且崩溃安全。** 树和 transcript offset 同住一个原子替换的 JSON 文件；roll 按 at-most-once 提交，模型输入不随 transcript 总长度增长。
-- **本地优先。** 无 CDN、无遥测、无 transcript 回写。服务只监听 `127.0.0.1`；同一用户可在任意本机浏览器直接打开固定地址读取真实状态，写操作仍受回环同源与严格请求校验保护。
-- **开源仓库不承载用户状态。** `state.json`、本机捕获和截图不参与构建或发布，并由隐私检查阻止误提交；运行时状态只保存在用户选择的本机状态目录。
-  即使显式传入 `--state-dir`，SessionMap 也拒绝把状态目录放进任何 Git worktree。
-
-## 安装与体验
-
-SessionMap 是本机 Bun 后台提供的同一份地图文档。系统浏览器始终可用；macOS 安装包还
-提供一个只管理窗口的极薄 App，支持稳定的 Dock 身份和可选置顶，但不拥有业务状态、
-第二服务、菜单栏监控或云端账户。支持的浏览器也可以把固定地址安装为 standalone Web App。
-
-目前支持 macOS 13 及以上的 Apple Silicon 和 Intel Mac。普通用户从
-[GitHub Releases](https://github.com/hao-cyber/session-map/releases) 下载最新的
-`SessionMap-<版本>.pkg`，双击后系统 Installer 会自动完成安装并打开 SessionMap App；不需要
-安装 Bun、Homebrew 或使用终端。安装包与内置 App 均使用 Developer ID 签名并通过 Apple 公证。
-
-开发者也可以通过 Homebrew tap 安装：
+**Homebrew:** two commands are required here. The first installs the CLI; the
+second installs and starts your background service.
 
 ```bash
 brew install hao-cyber/tap/sessionmap
@@ -96,133 +47,163 @@ sessionmap install
 sessionmap open
 ```
 
-Homebrew 升级后再次运行安装事务，让后台 binary 经过健康检查后原子替换：
+In Homebrew, a `tap` is simply a third-party formula repository. The full install
+command above adds `hao-cyber/tap` automatically, so there is no separate
+`brew tap` step.
+
+After upgrading the CLI, run `sessionmap install` once more to switch the service
+to the new binary:
 
 ```bash
 brew upgrade sessionmap
 sessionmap install
 ```
 
-不使用安装包或 Homebrew 时，也可以运行会验证 SHA-256 的安装脚本：
+Open the app or visit [http://127.0.0.1:4317/](http://127.0.0.1:4317/) in a local
+browser. The first launch lets you import 7, 30, or 90 days of history, start from
+a custom date, or skip old sessions. New sessions are organized in the background
+whichever option you choose.
+
+### Essential commands
+
+| Command | Purpose |
+|---|---|
+| `sessionmap open` | Open the map and verify its first rendered frame |
+| `sessionmap now` | List work needing attention; use `--jump N` to return |
+| `sessionmap status` | Inspect persistent-state status |
+| `sessionmap install` | Install, update, or repair the launchd service |
+| `sessionmap once` | Process one round of transcript updates |
+| `sessionmap uninstall` | Remove the launchd service |
+
+See the [product charter](docs/product-design.md),
+[architecture](docs/architecture.md), [contributing guide](CONTRIBUTING.md), and
+[security policy](SECURITY.md) for the full contracts.
+
+---
+
+## 中文
+
+Coding agent 开得越多，终端列表就越难回答几个简单的问题：这件事为什么走到这里？哪些
+办法已经试过？最后做了什么决定？下一步从哪儿接着做？
+
+SessionMap 把 Claude Code、Codex 等 coding agent 的本地对话，按它们背后的工作主线整理成
+一张思维地图。Session 关了，走过的路径还在，包括那些后来被否定的尝试。目标很具体：
+**切回任何一条工作线时，3 秒内找到上次停下的位置。**
+
+### 留下来的不只是摘要
+
+- **先看工作，再看 session。** 一级对象是一件持续推进的工作；session 是其中的入口，也是
+  你上次读到哪里的光标。
+- **旧判断不会被悄悄抹掉。** 目标、尝试、发现、决策、卡点和死路都保留。新证据可以修订
+  旧判断，但改过什么、为什么改，仍然看得见。
+- **现在做到哪儿，一眼能找到。** 每个 session 都有整体主标题、最新进展、实时终端状态和
+  返回入口。
+- **切回去之前先验证。** 终端还在，就回到原终端；终端关了，再用原 provider、session ID、
+  cwd 和原生 resume 命令恢复。证据对不上时会停下来，不会随便猜一个 session。
+
+## 快速安装
+
+支持 macOS 13 及以上的 Apple Silicon 与 Intel Mac。
+
+### 安装包（推荐）
+
+从 [GitHub Releases](https://github.com/hao-cyber/session-map/releases) 下载最新的
+`SessionMap-<版本>.pkg`，双击安装后会自动启动服务并打开 SessionMap App。安装包与 App
+使用 Developer ID 签名并通过 Apple 公证，不需要终端、Homebrew 或 Bun。
+
+### Homebrew
+
+这里确实需要两条命令。`brew install` 安装 `sessionmap` CLI；`sessionmap install` 把后台
+服务安装到当前用户并启动它。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/hao-cyber/session-map/v0.1.0-beta.2/scripts/install.sh \
-  | sh -s -- v0.1.0-beta.2
+brew install hao-cyber/tap/sessionmap
+sessionmap install
+sessionmap open
 ```
 
-安装后可在任意本机浏览器直接打开 `http://127.0.0.1:4317/`，无需先运行 `sessionmap open`
-或复用某个标签页的凭据；页面始终读取同一服务中的真实本地状态。`sessionmap open` 只是
-打开浏览器并确认首帧可见的便利命令。
-`sessionmap open` 会等到页面完成首次渲染才报告成功；系统仅接收 URL、但浏览器没有
-产生可见页面时，命令会明确失败。可用 `--browser chrome`、`--browser firefox` 或
-`--browser "Google Chrome"` 等选择任意已安装的 macOS 浏览器。
-Web bundle 使用内容版本隔离缓存；已有旧 Maintrail/SessionMap 缓存的浏览器 profile
-也会请求新资产，不需要用户手动清理缓存。
+`tap` 就是 Homebrew 的第三方软件配方仓库。上面的完整命令会自动添加 `hao-cyber/tap`，
+不用提前执行 `brew tap`。
 
-全新状态第一次打开时只统计本机可恢复 session，不读取旧正文或调用模型；你可以选择
-7/30/90 天（根据发现数量动态标注推荐）、自定义起始日，或“不导入历史”。确认后后台仍会持续
-整理新对话，历史任务可以暂停、继续、取消，之后也能“补扫历史”。工具栏“立即检查”只
-要求后台立刻发现一次新增内容，不会清空 offset、重做已有地图或扩大历史范围。
-历史整理按 session 保序、不同 session 最多两路并行，并为实时新对话保留独立处理槽；
-完成的工作线会立即出现，首次导入不会锁住地图阅读与跳转。
-
-生成一份不会读取真实 transcript 的演示树：
+以后升级 CLI，记得再跑一次 `sessionmap install`，让后台服务切换到新版本。已有地图和历史
+不会被删除：
 
 ```bash
-bun src/cli.ts demo --state-dir /tmp/sessionmap-demo
-bun src/cli.ts serve --state-dir /tmp/sessionmap-demo --no-watch
+brew upgrade sessionmap
+sessionmap install
 ```
 
-## 数据来源
+安装后可以打开 App，也可以在本机浏览器访问
+[http://127.0.0.1:4317/](http://127.0.0.1:4317/)。`sessionmap open` 会帮你打开浏览器，
+同时确认页面首帧已经正常显示。
 
-SessionMap 只读扫描以下 append-only JSONL：
+首次打开时，SessionMap 只统计有多少 session 可以恢复，不读取旧正文，也不会调用模型。
+接着你可以导入最近 7、30、90 天或某个日期之后的历史，也可以直接跳过。无论怎么选，新对话
+都会在后台持续整理。历史导入可以暂停、继续、取消，以后也能补扫更早的内容。
+
+## 工作方式
 
 ```text
-~/.claude/projects/*/<sessionId>.jsonl
-~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-$CODEX_HOME/sessions/YYYY/MM/DD/rollout-*.jsonl
-~/Library/Application Support/orca/codex-runtime-home/home/sessions/...
+Claude / Codex / Kimi / Grok transcripts · MiniMax snapshots
+              │ 只读发现与有界增量
+              ▼
+        已登录的 Roll 模型
+              │ 主线归属、结构转折、当前 ask
+              ▼
+        单写者 SessionMap runtime
+              │ offset-before-apply · 原子状态替换
+              ▼
+        state.json ─────► 本地地图文档
 ```
 
-标准目录、环境变量目录和 Orca 管理的 Codex home 会按 provider + session id 去重。同一个 WAL 即使被镜像到多个路径，也不会重复执行非幂等的 `grow`。
+- Provider registry 发现完整、可恢复的 transcript/event log；memory、摘要和 prompt history
+  不能独立驱动思维树。
+- 每轮最多把 12 KiB 有界语义增量交给用户选择且已登录的 Claude、Codex、Kimi 或 Grok CLI。
+- 模型判断开放语义；runtime 只负责 ID、schema、授权边界、串行写入、offset 和副作用。
+- 浏览器、CLI、installed Web App 和 macOS 极薄壳读取同一个 Bun 服务和同一份状态。
 
-默认 roll 引擎是 `claude -p`。已安装且已登录的 `codex`、`kimi`、`grok` 会出现在页面下拉框中；只安装但未登录的 CLI 会被明确标记，而不是选中后才静默失败。
+## 数据、安全与隐私
 
-树、live offset、历史导入进度和 open 回执签名密钥始终保存在本机。为了判断主线归属和结构变化，SessionMap 会把
-每轮不超过 12 KiB 的有界语义增量交给用户所选、已登录的模型 CLI；对应模型服务如何处理
-输入，取决于用户与该服务的账户和数据条款。SessionMap 自身没有云账户、analytics 或
-telemetry。
+- Transcript 永远只读；SessionMap 不修改 agent 的原始记录。
+- 服务只绑定 `127.0.0.1`，Web 资产全部 vendored，不使用 CDN、远程字体或遥测。
+- 状态只保存在 Git worktree 之外：
 
-## 使用方式
+  ```text
+  ~/Library/Application Support/SessionMap/state.json
+  ~/Library/Application Support/SessionMap/capability.token
+  ```
 
-- 点击主线标题或行首折叠控件：展开、折叠该主题的 Sessions 目录。
-- 页面常态是可纵向滚动的主题与 session 目录；一个主题有很多 session 时继续使用浏览器
-  原生滚动、滚动条和键盘导航，不需要拖动画布寻找入口。
-- 每个主题只有一份共享脉络，由主题行的“脉络/收起脉络”按钮独立控制。
-- Session 行没有脉络按钮；行尾根据实时状态显示“回到终端”或“恢复终端”，双击行执行
-  同一个终端动作。
-- `⌥` + 点击 session：通过 Orca 向该 session 发话。
-- 右键主线：立即归档；toast 中可以撤销。归档不是删除，后续 roll 仍会继续积累。
-- Session 行尾删除按钮：删除 SessionMap 中的该 session 记录并持久排除，原始 agent transcript 保持只读且不会被删除。若它是主题唯一 session，对应主题脉络一并删除；共享主题脉络会明确保留。
-- “主题脉络”在当前主题内展开局部结构树；只有该局部画布支持平移、缩放和“适合视图”。
-  页面滚动与局部相机都不会替用户自动展开或折叠内容。
+- `capability.token` 权限固定为 `0600`，只用于 `sessionmap open` 的短期首帧回执。
+- 显式删除只删除 SessionMap 记录并永久排除再次加工，不会删除原始 transcript。
+- 模型服务如何处理被提交的有界增量，取决于用户与对应服务的账户及数据条款。
 
-SessionMap 会先现场验证已知 terminal handle 或 PID；快速路径失效时，才并行刷新 Orca、transcript 与进程证据。Orca 可用时会定位 pane 与 terminal handle，完成切换、恢复或发话；没有 Orca 时，macOS 会按 TTY 精确聚焦 iTerm2 / Terminal，并在需要时打开新 Terminal 执行 resume。无 Orca 时不会注入键盘输入。
+## 使用
+
+- 点击工作主线标题：展开或折叠该主题的 Sessions 目录。
+- 点击主题行的“脉络”：原位展开该主题唯一的因果结构树。
+- 点击“回到终端”或“恢复终端”：返回经验证的原 session；双击 session 行执行同一动作。
+- `Option` + 点击 session：Orca 可用时向该 session 发话。
+- 右键主线：归档；可通过 toast 撤销。归档不会删除对象。
+- Session 行尾删除：删除本地记录并阻止再次加工，原始 transcript 保持不变。
 
 ## 命令行
 
-```bash
-sessionmap serve                 # watcher、keyed bounded roll workers、串行 commit gate、本地 UI
-sessionmap open                  # 安全地打开已运行服务的浏览器入口
-sessionmap now                   # 一屏查看最需要处理的工作；--jump N 可直接切回
-sessionmap once                  # 消费一轮待处理 transcript 增量
-sessionmap install               # 安装并启动当前用户的 launchd 服务
-sessionmap uninstall             # 移除 launchd 服务
-sessionmap status                # 查看持久状态摘要
-sessionmap demo                  # 写入演示状态
-```
+| 命令 | 作用 |
+|---|---|
+| `sessionmap open` | 打开地图并确认首帧成功渲染 |
+| `sessionmap now` | 一屏查看待处理工作；`--jump N` 可直接切回 |
+| `sessionmap status` | 查看持久状态摘要 |
+| `sessionmap install` | 安装、更新或修复当前用户的 launchd 服务 |
+| `sessionmap once` | 消费一轮待处理 transcript 增量 |
+| `sessionmap uninstall` | 移除 launchd 服务 |
+| `sessionmap demo` | 创建不读取真实 transcript 的合成演示状态 |
 
-按命令可使用 `--state-dir PATH`、`--port PORT`、`--no-open`、`--no-watch`；`open` 和
-`serve` 还支持 `--browser APP`，常用别名包括 chrome、safari、firefox、edge、brave、
-arc。正式状态默认位于：
+常用参数包括 `--state-dir PATH`、`--port PORT`、`--no-open`、`--no-watch` 和
+`--browser APP`；浏览器别名支持 chrome、safari、firefox、edge、brave 与 arc。
 
-```text
-~/Library/Application Support/SessionMap/state.json
-~/Library/Application Support/SessionMap/capability.token  # 仅用于签发 CLI open 回执
-```
+## 开发
 
-token 权限固定为 `0600`。从旧版 Maintrail 升级时，首次安装会原子迁移 `~/.maintrail` 中的状态和 token；旧状态保留作回滚依据，新服务验证健康后才移除旧 launchd 入口。
-
-## 有界数据管线
-
-```text
-Claude / Codex / Kimi / Grok JSONL · MiniMax bounded snapshots
-        │  5 秒轮询 · 32 KiB / 90 秒 linger · 45 秒冷却
-        ▼
-结构信号 adapter
-        │  用户/assistant 文本 + 工具与错误元数据 · ≤ 12 KiB
-        ▼
-一次性语义 roll 模型
-        │  已有主线 + 当前子树 ≤ 120 行 · ≤ 6 个 op
-        ▼
-单写者 runtime
-        │  子树授权 · offset-before-apply · 原子 rename
-        ▼
-state.json ───────────────► 本地 SessionMap UI
-```
-
-模型只拥有开放语义判断：主线归属、结构性转折、ask 的含义。Runtime 拥有 ID、schema、子树写边界、offset、串行化、幂等策略与所有副作用。模型输出始终按不可信输入处理。
-
-## 开发、构建与发布
-
-```bash
-bun run dev               # 开发服务
-bun run check             # 类型、Web/Swift、回归测试、CLI 与 App 构建
-bun run build             # 单文件 sessionmap CLI
-bun run build:app         # 当前架构的极薄 SessionMap.app
-```
-
-从源码体验：
+需要 Bun 1.3.13 或更高版本：
 
 ```bash
 git clone https://github.com/hao-cyber/session-map.git
@@ -231,13 +212,20 @@ bun install --frozen-lockfile
 bun run start
 ```
 
-`bun run build` 使用 Bun 生成当前平台的 standalone CLI。`v<semver>` tag 触发两个 macOS
-架构的原生构建、安装/健康/重启冒烟、Developer ID 签名、Installer package、Apple 公证、
-SHA-256 和 provenance attestation；全部通过后才创建 GitHub Release。安装包包含 universal
-极薄 App，但不生成第二套服务或状态；完整契约见[迁移与发布模块](docs/modules/migration-release.md)。
+```bash
+bun run dev        # 开发服务
+bun run check      # 类型、Web、隐私、测试、CLI 与 App 构建门禁
+bun run build      # standalone CLI
+bun run build:app  # macOS 极薄壳
+```
 
-回归测试覆盖损坏状态修复、跨主线越权、reattach 只读边界、巨行与半行 JSONL、自噬排除、12 KiB 硬上限、at-most-once 崩溃窗口、命令转义、Markdown / HTML 注入、任意本机浏览器直接读取、open ticket/ready 回执与 Origin / media type 校验。
+进一步阅读：
 
-贡献前请阅读 [贡献指南](CONTRIBUTING.md)。安全问题请按 [安全策略](SECURITY.md) 私下报告。
+- [产品与设计宪章](docs/product-design.md)
+- [仓库结构](docs/repository-structure.md)
+- [系统架构](docs/architecture.md)
+- [模块文档索引](AGENTS.md#模块文档索引)
+- [贡献指南](CONTRIBUTING.md)
+- [安全策略](SECURITY.md)
 
 MIT © 2026 Hao

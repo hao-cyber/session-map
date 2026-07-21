@@ -7,12 +7,22 @@ artifacts/
 *.tmp
 .DS_Store
 .maintrail/
+.maintrail-*
 .sessionmap/
+.sessionmap-*
+*baseline*.png
+*baseline*.jpg
+*baseline*.jpeg
+*baseline*.webp
+*baseline*.gif
 
 # Signing and App Store Connect credentials must stay outside the repository.
 *.p8
 *.p12
 *.pfx
+*.pem
 *.cer
 *.key
 *.certSigningRequest
+*.mobileprovision
+*.provisionprofile

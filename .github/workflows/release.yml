@@ -24,7 +24,7 @@ jobs:
         run: |
           PACKAGE_VERSION="$(bun -p "require('./package.json').version")"
           test "$GITHUB_REF_NAME" = "v$PACKAGE_VERSION"
-      - run: bun run check
+      - run: bun run check:ci
 
   build:
     needs: quality
@@ -183,7 +183,7 @@ jobs:
             mkdir -p "$ARCHIVE_ROOT/third-party-licenses"
             cp "$BINARY" "$ARCHIVE_ROOT/sessionmap"
             cp LICENSE README.md THIRD_PARTY_NOTICES.md "$ARCHIVE_ROOT/"
-            cp web/vendor/*_LICENSE "$ARCHIVE_ROOT/third-party-licenses/"
+            cp apps/web/src/vendor/*_LICENSE "$ARCHIVE_ROOT/third-party-licenses/"
             COPYFILE_DISABLE=1 tar -czf "release/sessionmap-$VERSION-darwin-$architecture.tar.gz" -C "$ARCHIVE_ROOT" .
 
             PACKAGE_ROOT="$RUNNER_TEMP/pkg-root-$architecture"

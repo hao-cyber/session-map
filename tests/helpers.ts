@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { SessionRecord, TranscriptMeta } from "../src/types.ts";
+import type { SessionRecord, TranscriptMeta } from "@sessionmap/core/types.ts";
 
 export function temporaryDirectory(prefix = "sessionmap-test-"): string {
   return mkdtempSync(join(tmpdir(), prefix));

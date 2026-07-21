@@ -1,15 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { InstanceLock, StateStore, containingGitWorktree, createEmptyState, repairState } from "../src/state.ts";
-import { TreeRuntime } from "../src/tree.ts";
+import { InstanceLock } from "@sessionmap/core/instance-lock.ts";
+import { createEmptyState, repairState } from "@sessionmap/core/state-repair.ts";
+import { StateStore, containingGitWorktree } from "@sessionmap/core/state-store.ts";
+import { TreeRuntime } from "@sessionmap/core/tree.ts";
 import {
   SCHEMA_VERSION,
   SESSION_PROGRESS_CHARS,
   SESSION_SUMMARY_CHARS,
   SESSION_TRAIL_ITEM_CHARS,
   SESSION_TRAIL_ITEMS,
-} from "../src/constants.ts";
+} from "@sessionmap/core/constants.ts";
 import { cleanup, temporaryDirectory, transcriptMeta } from "./helpers.ts";
 
 const directories: string[] = [];

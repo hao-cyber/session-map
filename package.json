@@ -1,6 +1,11 @@
 {
   "name": "sessionmap",
   "version": "0.1.0-beta.2",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "license": "MIT",
   "author": "Hao",
   "repository": {
@@ -20,28 +25,32 @@
   "type": "module",
   "description": "A persistent external thinking tree for parallel AI coding sessions",
   "bin": {
-    "sessionmap": "src/cli.ts"
+    "sessionmap": "apps/runtime/src/cli.ts"
   },
   "files": [
-    "src",
-    "web",
+    "apps/runtime/src",
+    "apps/web/src",
+    "apps/desktop/src",
+    "packages/core/src",
     "docs",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "dev": "SESSIONMAP_DEV=1 bun --watch src/cli.ts serve",
-    "start": "bun src/cli.ts serve",
+    "dev": "SESSIONMAP_DEV=1 bun --watch apps/runtime/src/cli.ts serve",
+    "start": "bun apps/runtime/src/cli.ts serve",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check:web": "bun run scripts/check-web.ts",
     "check:privacy": "bun run scripts/check-privacy.ts",
+    "check:secrets": "bun run scripts/check-gitleaks.ts",
+    "check:ci": "bun run check:secrets && bun run check",
     "build": "bun run scripts/build.ts",
     "build:app": "bun run scripts/build-macos-app.ts",
-    "check:app": "swiftc -parse-as-library -typecheck -framework AppKit -framework WebKit desktop/macos/SessionMapApp.swift && plutil -lint desktop/macos/Info.plist >/dev/null",
+    "check:app": "swiftc -parse-as-library -typecheck -framework AppKit -framework WebKit apps/desktop/src/SessionMapApp.swift && plutil -lint apps/desktop/src/Info.plist >/dev/null",
     "prepublishOnly": "bun run check",
-    "check:release": "sh -n scripts/install.sh scripts/macos/postinstall && plutil -lint scripts/macos/entitlements.plist desktop/macos/Info.plist >/dev/null && xmllint --noout scripts/macos/Distribution.xml",
+    "check:release": "sh -n scripts/install.sh scripts/macos/postinstall && plutil -lint scripts/macos/entitlements.plist apps/desktop/src/Info.plist >/dev/null && xmllint --noout scripts/macos/Distribution.xml",
     "check": "bun run typecheck && bun run check:web && bun run check:privacy && bun run check:app && bun run check:release && bun test && bun run build && bun run build:app"
   },
   "devDependencies": {

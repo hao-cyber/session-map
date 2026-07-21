@@ -1,5 +1,9 @@
 # SessionMap 架构说明
 
+仓库采用私有 Bun workspace 组织的模块化单体；源码目录与构建、运行、发布边界的映射见
+[仓库结构](repository-structure.md)，目录迁移决策见
+[ADR 0013](decisions/0013-private-workspace-modular-monolith.md)。
+
 ## 产品不变量
 
 SessionMap 是外置思维树。主线是一件正在推进的工作；session 只是只读数据源和树上的光标。结束 session 不能自动删除它承载的对象，启动替代 session 也不能机械地创建替代对象；用户明确执行隐私删除时例外。
@@ -48,7 +52,7 @@ keyed bounded roll workers
         │  同 session 有序、不同 session 有界并行，得到候选 mainline / ask / ops
         ▼
 串行 commit gate
-        │  校验 source/target 语义投影；过期候选用最新状态重算
+        │  只校验并原子提交；过期候选释放 gate 后用最新状态重算
         ▼
 Tree runtime（唯一写者）
         │  写边界、状态机、offset-before-apply、原子落盘
@@ -62,10 +66,12 @@ state.json + open 回执签名密钥
 ```
 
 Watcher 只采集与调度，永远不在轮询线程里等待慢模型。最多三个 roll worker，其中 history
-最多占两个槽，给 live 保留一个槽；同一逻辑 session 仍严格串行。模型输出只是候选，所有
-cursor 提交与树应用经过串行 commit gate；候选依赖的主线已变化时先用最新状态重算。
+最多占两个槽，给 live 保留一个槽；新 session 首次出现优先于普通 live，普通 live 优先于
+history，同一逻辑 session 仍严格串行。模型输出只是候选，所有 cursor 提交与树应用经过短
+串行 commit gate；候选依赖的主线已变化时释放 gate，再用最新状态有界重算。
 Roll CLI 是 one-shot、无状态执行器；树和 offset 才是持久状态来源。完整取舍见
-[ADR 0008](decisions/0008-bounded-parallel-rolls.md)。
+[ADR 0008](decisions/0008-bounded-parallel-rolls.md) 与
+[ADR 0014](decisions/0014-short-commit-gate-and-priority-lanes.md)。
 
 ## 轨迹与滚动快照
 
@@ -89,7 +95,8 @@ SessionMap 不把任何模型摘要声明为不可变真理。它区分两种存
 为所有发现的 source 写入 live 高水位，并为命中范围且尚未导入的逻辑 session 建立独立
 history cursor。历史 cursor 追到确认时的固定 `plannedSize` / snapshot 版本后标记 imported；
 同 source 在此之前阻塞 live 消费，其他 source 仍可继续。历史任务和 live 都遵守
-cursor-before-apply，失败项耐久暂停，重启后从已提交游标继续。已有树、session 或 offset
+cursor-before-apply；瞬时单项失败耐久退避且不阻塞其他 session，全局引擎失败或耗尽重试后
+暂停，重启从已提交游标继续。已有树、session 或 offset
 的旧 schema 修复为 intake complete，绝不因升级触发回扫。完整取舍见
 [ADR 0006](decisions/0006-explicit-history-intake.md)。
 

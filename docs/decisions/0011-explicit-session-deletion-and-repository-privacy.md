@@ -25,8 +25,10 @@ SessionMap 默认保留工作轨迹，但用户状态包含 session 标题、最
 - 若主题没有其他 session，删除整棵主题树；若仍有其他 session，保留共享主题树并在确认
   文案中明确说明。当前版本不声称对共享派生内容完成逐字段擦除。
 - 原始 transcript 永远不修改。若用户还要删除 provider 原始记录，应在对应 provider 中操作。
-- 编译只嵌入显式 Web 资产。Git 隐私检查拒绝 runtime 状态、截图/捕获、本机用户绝对路径和
-  常见密钥形态；这些检查进入 `bun run check` 与发布质量门禁。
+- 编译只嵌入显式 Web 资产。Git 隐私检查拒绝 runtime 状态、状态目录前缀（`.sessionmap*` /
+  `.maintrail*`）、截图/捕获目录、本地 UI baseline 图像、本机用户绝对路径和常见密钥形态；
+  这些检查进入 `bun run check` 与发布质量门禁，并由 `.gitignore` 同步排除。CI 与 Release
+  另用固定版本及 SHA-256 的 Gitleaks 扫描全部可达历史，补足 provider 与通用凭据规则。
 - StateStore 在任何落盘前拒绝 Git worktree 内的状态目录，包括显式 `--state-dir`。因此真实
   主题、session、脉络、快照与 offset 不会因开发或截图配置错误成为仓库文件。
 

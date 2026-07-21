@@ -8,11 +8,14 @@ session source，按持久消费位置读取有界片段，并把模型输出交
 
 ## 代码入口
 
-- `src/monitor.ts`：transcript 发现、进程与 session 关联。
-- `src/watcher.ts`：metadata inventory、首次 baseline、历史任务、监听去抖、keyed worker 与串行提交闸门。
-- `src/adapters.ts`：不同 transcript 格式的只读适配。
-- `src/providers.ts`：provider 的发现目录、source 形态、身份与恢复协议注册表。
-- `src/roll.ts`：有界模型输入、输出解析与 rolling snapshot。
+- `packages/core/src/monitor.ts`：transcript 发现、进程与 session 关联。
+- `packages/core/src/watcher.ts`：metadata inventory、首次 baseline、历史任务、监听去抖、keyed worker 与串行提交闸门。
+- `packages/core/src/adapters.ts`：不同 transcript 格式的只读适配。
+- `packages/core/src/providers.ts`：provider 的发现目录、source 形态、身份与恢复协议注册表。
+- `packages/core/src/roll.ts`：有界 prompt、模型 JSON 协议、输出校验与 rolling snapshot；
+  不探测或启动外部程序。
+- `packages/core/src/roll-engine.ts`：模型 CLI 的安装/登录探测、调用计划、超时、失败冷却和
+  进程执行；只返回经 `roll.ts` 协议校验的候选输出。
 
 ## 不变量
 
@@ -28,22 +31,28 @@ session source，按持久消费位置读取有界片段，并把模型输出交
   集合；结束边界固定为确认时的 source 大小/版本。以后扩大范围只导入未标记 imported 的
   逻辑 session，不回放已完成项。
 - History item 使用独立 cursor，单个 session 内按原始顺序有界滚动；未追到 high-water 前
-  阻塞同 source 的 live 队列。失败把 job 置为 paused，重启或显式继续从已提交 cursor 恢复。
-  取消保留已生成地图和 imported 记录，不回滚树。
+  阻塞同 source 的 live 队列。瞬时单项失败使用有界指数退避且不阻塞其他 session；引擎未登录
+  等全局失败立即暂停，单项耗尽三次尝试后只在其他可运行项收口时进入 paused。重启或显式继续
+  都从已提交 cursor 恢复。取消保留已生成地图和 imported 记录，不回滚树。
 - Roll 候选按 provider + logical session id 加顺序门禁：同 session 严格串行，不同 session
-  最多三个并行；history 最多占两个槽，给 live 保留一个槽。队列把 live 排在 history 前，
-  但不强杀已经在途的模型进程。
+  最多三个并行；history 最多占两个槽，给 live 保留一个槽。优先级固定为新 session 首次
+  出现、已有 session 实时更新、历史回填；同级保持 FIFO，但不强杀已经在途的模型进程。
 - 并行 worker 只读 transcript 和树投影，不直接写树。cursor/history 提交与
-  `TreeRuntime.applyRoll` 经过单一串行 commit gate；source root、目标 root 或新主线目录相对
-  分析时发生语义变化，候选必须在 gate 内用最新状态重算。完整协议与回滚见
-  [ADR 0008](../decisions/0008-bounded-parallel-rolls.md)。
+  `TreeRuntime.applyRoll` 经过单一串行 commit gate；gate 只做游标检查、候选新鲜度校验和原子
+  写入，不等待模型。source root、目标 root 或新主线目录发生变化时，先释放 gate，再基于最新
+  状态有界重算并重新竞争提交。完整协议与回滚见
+  [ADR 0014](../decisions/0014-short-commit-gate-and-priority-lanes.md)。
 - “立即检查”执行一次全量 metadata discovery 和当前增量 poll；它不重置 offset、history
   cursor 或 coverage，也不替代后台持续轮询。常态 live 仍只调度最近活跃的 60 个 source。
+- 全新发现且尚无 live offset 的 session 立即进入首次语义 roll；已经建立入口的 session
+  仍使用有界 linger 合并成批写入，避免首次入口在固定等待之后才开始承担模型延迟。
 - Append-only source 按 byte offset 消费；原子重写的 snapshot source 按 mtime 消费整个
   有界快照。两类 source 均须在应用非幂等 op 前持久提交消费位置。
 - 输入按字节、消息数和处理时长设硬边界。
 - 初始命令行没有 session ID 时，关联必须依赖可验证的打开文件、PID、TTY 等证据。
 - 模型不可用或输出无效时保留既有地图，不伪造语义更新。
+- 模型协议不依赖具体 CLI；外部引擎执行只能通过 roll-engine 接入，且不能绕过 roll 的
+  有界输入和输出校验。roll-engine 无持久业务状态，失败冷却只影响可用性投影。
 - 正式服务日志为每次外部 roll 记录 engine、mode、attempt、provider、session id、开始与完成
   时长；`attempt=stale-retry` 表示候选因语义投影变化而重算。失败记录同一身份和总耗时，
   不写 transcript 正文、prompt、模型输出或 transcript 绝对路径。
@@ -62,5 +71,5 @@ session source，按持久消费位置读取有界片段，并把模型输出交
 主要覆盖在 `tests/monitor.test.ts`、`tests/watcher.test.ts` 和
 `tests/adapters-roll.test.ts`。重启验收还应比较节点 ID 集合与 offsets，确认没有重复生长。
 首次摄取还须验证确认前零模型调用、skip baseline、范围扩展不重复、固定 history 边界、
-失败续跑、snapshot 不重复消费、手动检查不改变 coverage、不同 session 的有界并行、live
-保留槽与 stale candidate 重算。
+失败隔离与续跑、snapshot 不重复消费、手动检查不改变 coverage、不同 session 的有界并行、
+三级优先级、live 保留槽、短 commit gate 与 stale candidate 重算。

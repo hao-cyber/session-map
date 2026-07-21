@@ -1,7 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { AssetStore } from "@sessionmap/runtime/assets.ts";
 
-const source = readFileSync(resolve(import.meta.dir, "..", "web", "app.js"), "utf8");
+const source = new AssetStore().get("app.js")?.body;
+if (!source) throw new Error("Browser JavaScript bundle is unavailable.");
 const transpiler = new Bun.Transpiler({ loader: "js", target: "browser" });
 transpiler.transformSync(source);
 console.log("Browser JavaScript parsed successfully.");

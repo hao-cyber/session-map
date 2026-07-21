@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { byteLength } from "../src/utils.ts";
-import { GIANT_LINE_BYTES, MAX_DELTA_BYTES, MAX_READ_BYTES, ROLL_SENTINEL } from "../src/constants.ts";
-import { providerForPath, readTranscriptDelta, stripInjectedPrefixes } from "../src/adapters.ts";
-import { buildRollPrompt, extractRollOutput } from "../src/roll.ts";
-import { StateStore } from "../src/state.ts";
-import { TreeRuntime } from "../src/tree.ts";
+import { byteLength } from "@sessionmap/core/utils.ts";
+import { GIANT_LINE_BYTES, MAX_DELTA_BYTES, MAX_READ_BYTES, ROLL_SENTINEL } from "@sessionmap/core/constants.ts";
+import { providerForPath, readTranscriptDelta, stripInjectedPrefixes } from "@sessionmap/core/adapters.ts";
+import { buildRollPrompt, extractRollOutput } from "@sessionmap/core/roll.ts";
+import { StateStore } from "@sessionmap/core/state-store.ts";
+import { TreeRuntime } from "@sessionmap/core/tree.ts";
 import { cleanup, temporaryDirectory, transcriptMeta, writeJsonLines } from "./helpers.ts";
 
 const directories: string[] = [];

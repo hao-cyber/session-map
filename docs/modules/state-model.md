@@ -7,10 +7,14 @@
 
 ## 代码入口
 
-- `src/types.ts`：持久 schema 与运行时类型。
-- `src/state.ts`：单写者、原子替换、revision 与状态加载。
-- `src/tree.ts`：节点生长、修订、关闭、归档和撤销边界。
-- `src/constants.ts`：schema 与有界输入常量。
+- `packages/core/src/types.ts`：持久 schema 与运行时类型。
+- `packages/core/src/state-repair.ts`：空状态创建、旧 schema 修复与不可信持久状态归一化；
+  不拥有文件读写。
+- `packages/core/src/state-store.ts`：唯一状态加载/更新入口、Git worktree 防护、revision、
+  串行更新与 fsync + rename 原子替换。
+- `packages/core/src/instance-lock.ts`：唯一 Bun runtime 进程锁；不读取或解释业务状态。
+- `packages/core/src/tree.ts`：节点生长、修订、关闭、归档和撤销边界。
+- `packages/core/src/constants.ts`：schema 与有界输入常量。
 
 ## 不变量
 
@@ -23,12 +27,16 @@
 - 已关闭判断不能原地复活；新证据必须生长新方向并保留修订关系。
 - 一个 transcript offset 至多消费一次；提交状态必须原子替换。
 - `intake.phase`、coverage、imported 逻辑 session 与 history job 同住 `state.json`；浏览器不
-  持有导入事实。History item 的 cursor 与 live offset 分离，两者都只能单调前进。
+  持有导入事实。History item 的 cursor 与 live offset 分离，两者都只能单调前进；history
+  item 的 `retryCount` / `retryAt` 和 job 的 `lastProgressAt` 是耐久恢复与停滞解释依据，UI
+  阶段仍是 watcher 的瞬时投影，重启后不得把旧 `rolling` 状态当作事实。
 - 真正空的新状态进入 `awaiting-choice`；缺少 intake 字段但已有 roots、nodes、sessions 或
   offsets 的旧状态修复为 `complete`，不得改变既有 offset 或触发历史任务。
 - Session 的 `firstSeenAt` 只在首次创建时写入，后续活动不得改写；旧状态缺失该字段时
   以已有 `lastTranscriptAt` 修复并持久化，不改变 session 对象、归属或 offset。
 - runtime 只校验 ID、schema、边界和副作用，不自行猜测语义。
+- 状态修复只产生归一化后的内存对象；只有 StateStore 可以把它持久化。InstanceLock 只保护
+  唯一 runtime 生命周期，不成为第二个状态或写入协议。
 
 ## 验证
 

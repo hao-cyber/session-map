@@ -2,11 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { appendFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { StateStore } from "../src/state.ts";
-import { TreeRuntime } from "../src/tree.ts";
-import type { RollOutput, TranscriptMeta } from "../src/types.ts";
-import { discoverTranscripts, TranscriptWatcher, type TranscriptFile } from "../src/watcher.ts";
-import { sleep } from "../src/utils.ts";
+import { StateStore } from "@sessionmap/core/state-store.ts";
+import { TreeRuntime } from "@sessionmap/core/tree.ts";
+import type { RollOutput, TranscriptMeta } from "@sessionmap/core/types.ts";
+import { discoverTranscripts, TranscriptWatcher, type TranscriptFile } from "@sessionmap/core/watcher.ts";
+import { sleep } from "@sessionmap/core/utils.ts";
 import { cleanup, temporaryDirectory, transcriptMeta, writeJsonLines } from "./helpers.ts";
 
 const directories: string[] = [];
@@ -59,6 +59,73 @@ describe("watcher delivery semantics", () => {
     expect(prompts[0]).not.toContain("建立新的结构节点");
   });
 
+  test("starts a newly discovered live session without applying the 90-second linger", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const path = join(root, "new-live.jsonl");
+    let discovered = false;
+    const source = (): TranscriptFile[] => {
+      if (!discovered) return [];
+      const stat = statSync(path);
+      return [{ path, provider: "claude", sessionId: "new-live", size: stat.size, mtimeMs: stat.mtimeMs }];
+    };
+    const store = new StateStore(join(root, "state"));
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async () => ({
+      mainline: "New live work",
+      ask: { kind: "none", hint: "" },
+      ops: [],
+    }), source);
+
+    await watcher.chooseHistory(null);
+    writeJsonLines(path, [{ type: "user", sessionId: "new-live", cwd: root, message: { role: "user", content: "刚创建的工作" } }]);
+    discovered = true;
+    await watcher.poll(false);
+    for (let attempt = 0; attempt < 100 && !store.snapshot().sessions["new-live"]; attempt += 1) await sleep(5);
+
+    expect(store.snapshot().sessions["new-live"]).toBeDefined();
+  });
+
+  test("exposes durable byte progress while a large history session is still incomplete", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const path = join(root, "large-history.jsonl");
+    writeJsonLines(path, Array.from({ length: 5_000 }, (_, index) => ({
+      type: "user",
+      sessionId: "large-history",
+      cwd: root,
+      message: { role: "user", content: `${index}:${"x".repeat(900)}` },
+    })));
+    const source = (): TranscriptFile[] => {
+      const stat = statSync(path);
+      return [{ path, provider: "claude", sessionId: "large-history", size: stat.size, mtimeMs: stat.mtimeMs }];
+    };
+    const store = new StateStore(join(root, "state"));
+    let calls = 0;
+    let signalSecond!: () => void;
+    let releaseSecond!: () => void;
+    const secondStarted = new Promise<void>((resolve) => { signalSecond = resolve; });
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async () => {
+      calls += 1;
+      if (calls === 2) {
+        signalSecond();
+        await secondGate;
+      }
+      return { mainline: "Large history", ask: { kind: "none", hint: "" }, ops: [] };
+    }, source);
+
+    await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    await secondStarted;
+    const job = watcher.intakeView().job;
+    expect(job?.completed).toBe(0);
+    expect(job?.processedBytes).toBeGreaterThan(0);
+    expect(job?.processedBytes).toBeLessThan(job?.totalBytes ?? 0);
+    expect(job?.current?.processedBytes).toBe(job?.processedBytes);
+    releaseSecond();
+    await watcher.once();
+    expect(store.snapshot().intake.job?.status).toBe("complete");
+  });
+
   test("imports only the selected history range and extends it without replaying imports", async () => {
     const root = temporaryDirectory();
     directories.push(root);
@@ -99,7 +166,7 @@ describe("watcher delivery semantics", () => {
     expect(watcher.intakeView().inventory.ranges.find((range) => range.days === 90)?.sessions).toBe(0);
   });
 
-  test("pauses a failed history item and resumes it from its durable cursor", async () => {
+  test("retries a transient history failure without pausing the whole import", async () => {
     const fixture = setup();
     let calls = 0;
     const watcher = new TranscriptWatcher(fixture.store, new TreeRuntime(fixture.store), fixture.root, undefined, async () => {
@@ -110,14 +177,64 @@ describe("watcher delivery semantics", () => {
 
     await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
     await watcher.once();
-    expect(fixture.store.snapshot().intake.job?.status).toBe("paused");
-    expect(Object.values(fixture.store.snapshot().intake.job!.items)[0]?.cursor).toBe(0);
+    const failedOnce = Object.values(fixture.store.snapshot().intake.job!.items)[0];
+    expect(fixture.store.snapshot().intake.job?.status).toBe("running");
+    expect(failedOnce?.status).toBe("pending");
+    expect(failedOnce?.retryCount).toBe(1);
+    expect(failedOnce?.cursor).toBe(0);
 
-    await watcher.resumeHistory();
+    await watcher.checkNow();
     await watcher.once();
     expect(calls).toBe(2);
     expect(fixture.store.snapshot().intake.phase).toBe("complete");
     expect(fixture.store.snapshot().intake.job?.status).toBe("complete");
+  });
+
+  test("keeps other history sessions moving when one session fails", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const paths = ["broken", "healthy"].map((id) => {
+      const path = join(root, `${id}.jsonl`);
+      writeJsonLines(path, [{ type: "user", sessionId: id, cwd: root, message: { role: "user", content: id } }]);
+      return path;
+    });
+    const orderedAt = Date.now();
+    const source = (): TranscriptFile[] => paths.map((path, index) => {
+      const id = path.slice(path.lastIndexOf("/") + 1, -6);
+      return { path, provider: "claude" as const, sessionId: id, size: statSync(path).size, mtimeMs: orderedAt - index };
+    });
+    const store = new StateStore(join(root, "state"));
+    let brokenCalls = 0;
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async (_engine, prompt) => {
+      const delta = prompt.split("FILTERED TRANSCRIPT INCREMENT")[1] ?? "";
+      if (delta.includes("broken")) {
+        brokenCalls += 1;
+        if (brokenCalls === 1) throw new Error("temporary broken session");
+      }
+      return { mainline: delta.includes("healthy") ? "Healthy" : "Recovered", ask: { kind: "none", hint: "" }, ops: [] };
+    }, source);
+
+    await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    await watcher.once();
+    expect(store.snapshot().mainlineIndex.Healthy).toBeString();
+    expect(store.snapshot().intake.job?.status).toBe("running");
+    await watcher.checkNow();
+    await watcher.once();
+    expect(store.snapshot().mainlineIndex.Recovered).toBeString();
+    expect(store.snapshot().intake.job?.status).toBe("complete");
+  });
+
+  test("pauses immediately when the selected roll engine is globally unavailable", async () => {
+    const fixture = setup();
+    const watcher = new TranscriptWatcher(fixture.store, new TreeRuntime(fixture.store), fixture.root, undefined, async () => {
+      throw new Error("roll engine codex is not available (not-authenticated)");
+    }, fixture.source);
+
+    await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    await watcher.once();
+    const job = fixture.store.snapshot().intake.job;
+    expect(job?.status).toBe("paused");
+    expect(Object.values(job!.items)[0]?.status).toBe("failed");
   });
 
   test("cancelling an in-flight history roll keeps its late model result out of the tree", async () => {
@@ -232,6 +349,77 @@ describe("watcher delivery semantics", () => {
     expect(store.snapshot().intake.job?.status).toBe("complete");
   });
 
+  test("runs a new session before an already-known live update when both are queued", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const historyPaths = ["history-one", "history-two"].map((id) => {
+      const path = join(root, `${id}.jsonl`);
+      writeJsonLines(path, [{ type: "user", sessionId: id, cwd: root, message: { role: "user", content: id } }]);
+      return path;
+    });
+    const liveBlockPath = join(root, "live-block.jsonl");
+    const updatePath = join(root, "known-update.jsonl");
+    const newPath = join(root, "brand-new.jsonl");
+    writeJsonLines(liveBlockPath, [{ type: "user", sessionId: "live-block", cwd: root, message: { role: "user", content: "baseline" } }]);
+    writeJsonLines(updatePath, [{ type: "user", sessionId: "known-update", cwd: root, message: { role: "user", content: "baseline" } }]);
+    let visiblePaths = [...historyPaths];
+    const source = (): TranscriptFile[] => visiblePaths.map((path) => {
+      const id = path.slice(path.lastIndexOf("/") + 1, -6);
+      return { path, provider: "claude" as const, sessionId: id, size: statSync(path).size, mtimeMs: statSync(path).mtimeMs };
+    });
+    const store = new StateStore(join(root, "state"));
+    let historyStarted = 0;
+    let signalHistory!: () => void;
+    let releaseHistory!: () => void;
+    let signalLiveBlock!: () => void;
+    let releaseLiveBlock!: () => void;
+    let signalPriority!: () => void;
+    const bothHistoryStarted = new Promise<void>((resolve) => { signalHistory = resolve; });
+    const historyGate = new Promise<void>((resolve) => { releaseHistory = resolve; });
+    const liveBlockStarted = new Promise<void>((resolve) => { signalLiveBlock = resolve; });
+    const liveBlockGate = new Promise<void>((resolve) => { releaseLiveBlock = resolve; });
+    const priorityStarted = new Promise<void>((resolve) => { signalPriority = resolve; });
+    let firstQueued = "";
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async (_engine, prompt) => {
+      const delta = prompt.split("FILTERED TRANSCRIPT INCREMENT")[1] ?? "";
+      if (prompt.includes("HISTORICAL IMPORT")) {
+        historyStarted += 1;
+        if (historyStarted === 2) signalHistory();
+        if (historyStarted <= 2) await historyGate;
+      } else if (delta.includes("block-live")) {
+        signalLiveBlock();
+        await liveBlockGate;
+      } else if (delta.includes("queued-new") || delta.includes("queued-update")) {
+        if (!firstQueued) {
+          firstQueued = delta.includes("queued-new") ? "new" : "update";
+          signalPriority();
+        }
+      }
+      return { mainline: "Priority", ask: { kind: "none", hint: "" }, ops: [] };
+    }, source);
+
+    await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    await bothHistoryStarted;
+    await store.update((state) => {
+      for (const [path, id] of [[liveBlockPath, "live-block"], [updatePath, "known-update"]] as const) {
+        state.offsets[path] = { path, provider: "claude", sessionId: id, offset: statSync(path).size, mtimeMs: statSync(path).mtimeMs, cooldownUntil: 0 };
+      }
+    });
+    appendFileSync(liveBlockPath, `${JSON.stringify({ type: "user", sessionId: "live-block", cwd: root, message: { role: "user", content: "block-live" } })}\n`);
+    visiblePaths = [...historyPaths, liveBlockPath];
+    await watcher.checkNow();
+    await liveBlockStarted;
+    appendFileSync(updatePath, `${JSON.stringify({ type: "user", sessionId: "known-update", cwd: root, message: { role: "user", content: "queued-update" } })}\n`);
+    writeJsonLines(newPath, [{ type: "user", sessionId: "brand-new", cwd: root, message: { role: "user", content: "queued-new" } }]);
+    visiblePaths = [...historyPaths, updatePath, newPath, liveBlockPath];
+    await watcher.checkNow();
+    releaseLiveBlock();
+    await priorityStarted;
+    expect(firstQueued).toBe("new");
+    releaseHistory();
+    await watcher.once();
+  });
+
   test("re-rolls a candidate when a concurrently committed new mainline makes its context stale", async () => {
     const root = temporaryDirectory();
     directories.push(root);
@@ -240,9 +428,10 @@ describe("watcher delivery semantics", () => {
       writeJsonLines(path, [{ type: "user", sessionId: id, cwd: root, message: { role: "user", content: `marker-${id}` } }]);
       return path;
     });
-    const source = (): TranscriptFile[] => paths.map((path) => {
+    const gateOrderAt = Date.now();
+    const source = (): TranscriptFile[] => paths.map((path, index) => {
       const id = path.slice(path.lastIndexOf("/") + 1, -6);
-      return { path, provider: "claude" as const, sessionId: id, size: statSync(path).size, mtimeMs: statSync(path).mtimeMs };
+      return { path, provider: "claude" as const, sessionId: id, size: statSync(path).size, mtimeMs: gateOrderAt - index };
     });
     const store = new StateStore(join(root, "state"));
     const calls = { alpha: 0, beta: 0 };
@@ -272,6 +461,67 @@ describe("watcher delivery semantics", () => {
     expect(calls.alpha).toBe(1);
     expect(calls.beta).toBe(2);
     expect(store.snapshot().mainlineIndex["Beta line"]).toBeString();
+  });
+
+  test("does not hold the global commit gate while a stale candidate is re-rolled", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const paths = ["alpha", "beta", "gamma"].map((id) => {
+      const path = join(root, `${id}.jsonl`);
+      writeJsonLines(path, [{ type: "user", sessionId: id, cwd: root, message: { role: "user", content: `gate-${id}` } }]);
+      return path;
+    });
+    const gateTestAt = Date.now();
+    const source = (): TranscriptFile[] => paths.map((path, index) => {
+      const id = path.slice(path.lastIndexOf("/") + 1, -6);
+      return { path, provider: "claude" as const, sessionId: id, size: statSync(path).size, mtimeMs: gateTestAt - index };
+    });
+    const store = new StateStore(join(root, "state"));
+    let alphaRelease!: () => void;
+    let betaRelease!: () => void;
+    let gammaRelease!: () => void;
+    let retryRelease!: () => void;
+    let signalInitial!: () => void;
+    let signalRetry!: () => void;
+    const alphaGate = new Promise<void>((resolve) => { alphaRelease = resolve; });
+    const betaGate = new Promise<void>((resolve) => { betaRelease = resolve; });
+    const gammaGate = new Promise<void>((resolve) => { gammaRelease = resolve; });
+    const retryGate = new Promise<void>((resolve) => { retryRelease = resolve; });
+    const initialStarted = new Promise<void>((resolve) => { signalInitial = resolve; });
+    const retryStarted = new Promise<void>((resolve) => { signalRetry = resolve; });
+    let initialCount = 0;
+    let betaCalls = 0;
+    const watcher = new TranscriptWatcher(store, new TreeRuntime(store), root, undefined, async (_engine, prompt) => {
+      const delta = prompt.split("FILTERED TRANSCRIPT INCREMENT")[1] ?? "";
+      const id = ["alpha", "beta", "gamma"].find((candidate) => delta.includes(`gate-${candidate}`))!;
+      if (id === "beta") betaCalls += 1;
+      if (betaCalls === 2 && id === "beta") {
+        signalRetry();
+        await retryGate;
+      } else if (id === "alpha") {
+        initialCount += 1;
+        if (initialCount === 2) signalInitial();
+        await alphaGate;
+      } else if (id === "beta") {
+        initialCount += 1;
+        if (initialCount === 2) signalInitial();
+        await betaGate;
+      } else await gammaGate;
+      return { mainline: `${id} gate`, ask: { kind: "none", hint: "" }, ops: [] };
+    }, source);
+
+    await watcher.chooseHistory(new Date(Date.now() - 30 * 86_400_000).toISOString());
+    await initialStarted;
+    alphaRelease();
+    for (let attempt = 0; attempt < 100 && !store.snapshot().mainlineIndex["alpha gate"]; attempt += 1) await sleep(5);
+    betaRelease();
+    await retryStarted;
+    gammaRelease();
+    for (let attempt = 0; attempt < 100 && !store.snapshot().mainlineIndex["gamma gate"]; attempt += 1) await sleep(5);
+    expect(store.snapshot().mainlineIndex["gamma gate"]).toBeString();
+    retryRelease();
+    await watcher.once();
+    expect(store.snapshot().mainlineIndex["beta gate"]).toBeString();
   });
 
   test("discovers Codex transcripts from an alternate runtime home", () => {

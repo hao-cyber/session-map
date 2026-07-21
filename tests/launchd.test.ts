@@ -11,9 +11,9 @@ import {
   launchAgentPath,
   launchArguments,
   launchdPlist,
-} from "../src/launchd.ts";
-import { createEmptyState } from "../src/state.ts";
-import { defaultStateDirectory, legacyStateDirectory } from "../src/utils.ts";
+} from "@sessionmap/runtime/launchd.ts";
+import { createEmptyState } from "@sessionmap/core/state-repair.ts";
+import { defaultStateDirectory, legacyStateDirectory } from "@sessionmap/core/utils.ts";
 import { cleanup, temporaryDirectory } from "./helpers.ts";
 
 const roots: string[] = [];

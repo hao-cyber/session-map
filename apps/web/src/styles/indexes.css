@@ -1,0 +1,148 @@
+.topic-index {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: calc(100vh - 56px);
+  overflow: hidden auto;
+  padding: 18px 12px 32px;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
+}
+
+.topic-index-head {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.attention-index {
+  margin: 0 0 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+#attention-index-list { display: grid; gap: 6px; padding-top: 4px; }
+
+.attention-item {
+  width: 100%;
+  min-height: 52px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px 9px 11px;
+  border: 1px solid rgba(224, 219, 207, 0.9);
+  border-left-width: 3px;
+  border-radius: 8px;
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+  cursor: pointer;
+}
+
+.attention-item:hover { border-color: #d3cdbd; }
+.attention-item:active { background: #f5f2ea; }
+.attention-item:focus-visible { outline: 0; box-shadow: inset 0 0 0 2px var(--focus); }
+
+.attention-item-marker {
+  display: none;
+}
+
+.attention-item[data-kind="decision"] { border-left-color: var(--decision); background: rgba(180, 35, 58, 0.035); }
+.attention-item[data-kind="reply"] { border-left-color: var(--waiting); background: rgba(154, 91, 0, 0.04); }
+.attention-item[data-kind="blocker"] { border-left-color: var(--blocked); background: rgba(194, 65, 59, 0.035); }
+
+.attention-item-copy { min-width: 0; display: grid; gap: 2px; }
+.attention-mainline,
+.attention-detail { overflow: hidden; text-overflow: ellipsis; }
+.attention-detail { color: var(--ink-soft); font-size: 11px; line-height: 1.35; white-space: nowrap; }
+.attention-mainline {
+  display: -webkit-box;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.35;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.attention-time { align-self: start; padding-top: 2px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+
+.attention-empty {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 9px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.attention-empty .icon { width: 12px; height: 12px; flex-basis: 12px; }
+
+#topic-index-list { padding: 4px 0; }
+
+#topic-index-list button {
+  width: 100%;
+  min-height: 38px;
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+#topic-index-list button:hover { color: var(--ink); background: rgba(253, 252, 249, 0.72); }
+#topic-index-list button.is-current {
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: inset 2px 0 0 var(--focus), 0 0 0 1px rgba(218, 219, 224, 0.7);
+}
+
+.topic-index-marker {
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--branch);
+  border-radius: 50%;
+  background: transparent;
+}
+
+.topic-index-copy {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 590;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-index-sessions {
+  min-width: 17px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(38, 35, 28, 0.06);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.topic-index-sessions[hidden] { display: none; }
+
+#topic-index-list .state-decision .topic-index-marker { border-color: var(--decision); background: var(--decision); }
+#topic-index-list .state-waiting .topic-index-marker { border-color: var(--waiting); background: var(--waiting); }
+#topic-index-list .state-blocked .topic-index-marker { border-color: var(--blocked); background: var(--blocked); }
+#topic-index-list .state-busy .topic-index-marker { border-color: var(--busy); background: var(--busy); animation: breathe 2.7s ease-in-out infinite; }
+#topic-index-list .state-recent .topic-index-marker { border-color: var(--fresh-5); background: var(--fresh-5); }

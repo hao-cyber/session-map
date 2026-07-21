@@ -1,6 +1,6 @@
 # ADR 0008：有界并行 Roll 与串行语义提交
 
-> 状态：已采纳
+> 状态：部分被 [ADR 0014](0014-short-commit-gate-and-priority-lanes.md) 替代
 > 日期：2026-07-20
 
 ## 背景与约束

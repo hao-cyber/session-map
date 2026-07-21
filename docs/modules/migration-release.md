@@ -7,10 +7,11 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 
 ## 代码入口
 
-- `src/migration.ts`：旧状态读取、schema 修复、语义保全验证和原子落盘。
-- `src/launchd.ts`：旧 writer 停止、新服务启动、健康确认与失败回滚。
+- `apps/runtime/src/migration.ts`：旧状态读取、schema 修复、语义保全验证和原子落盘。
+- `apps/runtime/src/launchd.ts`：旧 writer 停止、新服务启动、健康确认与失败回滚。
 - `scripts/build.ts`：当前平台的 Bun standalone CLI。
-- `scripts/build-macos-app.ts`、`desktop/macos/`：极薄 App 壳、universal 构建与图标。
+- `scripts/build-macos-app.ts`、`apps/desktop/src/`：极薄 App 壳、universal 构建与图标。
+- `scripts/check-privacy.ts`、`scripts/check-gitleaks.ts`：候选文件与 Git 历史的隐私、凭据门禁。
 - `scripts/install.sh`：按架构下载、校验并调用统一 CLI 安装事务。
 - `scripts/macos/`：安装包架构选择、最小权限 postinstall 和 runtime 签名权限。
 - `.github/workflows/ci.yml`：类型、测试、Web 与 CLI 构建门禁。
@@ -58,9 +59,11 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
   原子状态一起保留，升级与重启都不得倒退。
 - 发布产物不包含 token、QA 原始捕获、依赖目录或本机构建缓存。
 - `bun run check` 的隐私门禁扫描当前候选文件和全部可达 Git 历史，拒绝跟踪
-  `state.json`、`capability.token`、状态目录、截图/捕获目录、具体本机用户路径和常见
-  密钥形态；CI 与 Release 必须完整 checkout 历史，发布脚本仍只能从已跟踪源码与显式
-  构建产物组装 archive。
+  `state.json`、`capability.token`、状态目录（含 `.sessionmap*` / `.maintrail*`）、
+  截图/捕获目录、本地 UI baseline 图像（文件名含 `baseline` 的 png/jpeg/webp/gif）、
+  具体本机用户路径和常见密钥形态；`.gitignore` 同步忽略这些路径，避免误 `git add`。
+  CI 与 Release 必须完整 checkout 历史，再用固定为 8.30.1 且校验官方 SHA-256 的 Gitleaks
+  扫描全部可达提交；发布脚本仍只能从已跟踪源码与显式构建产物组装 archive。
 - runtime 同时拒绝在 Git worktree 内创建状态目录；迁移与安装不得以仓库路径作为目标，
   从源头避免主题、session、脉络或快照成为待提交文件。
 - 发布生成无状态 universal App，但不生成第二服务或业务客户端；`.pkg` 仍是已签名、公证
@@ -69,7 +72,8 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 
 ## 验证
 
-运行 `bun run check`。发布 workflow 还必须在 arm64 和 x86_64 原生 runner 分别对 standalone
+本地运行 `bun run check`；需要复现外部历史扫描时运行 `bun run check:secrets`，CI 与 Release
+统一运行 `bun run check:ci`。发布 workflow 还必须在 arm64 和 x86_64 原生 runner 分别对 standalone
 CLI 做 `--version`、架构、`install`、`/health` 和 launchd 重启冒烟；App 验证 universal
 架构、受限导航、签名、冷启动与同一地图首帧；对安装包验证签名、
 公证票据和 Gatekeeper assessment；生成 SHA-256 与 provenance；并比较迁移前后 roots、

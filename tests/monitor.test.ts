@@ -6,7 +6,7 @@ import {
   readGitWorkspace,
   readTranscriptProcess,
   readTranscriptProcesses,
-} from "../src/monitor.ts";
+} from "@sessionmap/core/monitor.ts";
 import { sessionRecord } from "./helpers.ts";
 
 describe("session monitor state merge", () => {

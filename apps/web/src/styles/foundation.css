@@ -1,0 +1,168 @@
+:root {
+  --icon-chevron-down: url("/assets/vendor/icons/chevron-down.svg?v=__SESSIONMAP_ASSET_VERSION__");
+  --bg: #f5f3ed;
+  --surface: #fdfcf9;
+  --surface-raised: #ffffff;
+  --surface-hover: #edeae1;
+  --line: #e3ded3;
+  --branch: #a8a195;
+  --ink: #26231c;
+  --ink-soft: #4f4b42;
+  --muted: #6f6a5e;
+  --faint: #aaa495;
+  --decision: #b4233a;
+  --waiting: #9a5b00;
+  --busy: #18734b;
+  --blocked: #c2413b;
+  --fresh-5: #6f55c7;
+  --fresh-15: #70839c;
+  --focus: #5d6470;
+  --sidebar: #ebe7dd;
+  --shadow: 0 18px 52px rgba(38, 35, 28, 0.13), 0 2px 8px rgba(38, 35, 28, 0.05);
+  color: var(--ink);
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Segoe UI", sans-serif;
+  font-synthesis: none;
+}
+
+* { box-sizing: border-box; }
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+}
+
+button,
+select,
+textarea { font: inherit; }
+
+button,
+select { color: inherit; }
+
+button:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.fm-line:focus-visible {
+  outline: 0;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
+.topbar {
+  position: relative;
+  z-index: 20;
+  min-height: 56px;
+  display: grid;
+  grid-template-columns: minmax(224px, auto) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 20px;
+  padding: 9px 16px 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(253, 252, 249, 0.88);
+  backdrop-filter: blur(20px) saturate(1.2);
+  flex: 0 0 auto;
+}
+
+.brand-block {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+
+.brand-block strong {
+  display: block;
+  color: var(--ink);
+  font-family: ui-serif, "New York", serif;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+#status-line {
+  display: inline-block;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.status-row { min-width: 0; display: flex; align-items: center; gap: 7px; margin-top: 3px; }
+#check-now-button {
+  min-height: 22px;
+  padding: 0 4px;
+  border: 0;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  cursor: pointer;
+}
+#check-now-button:hover { color: var(--ink); }
+#check-now-button:disabled { cursor: wait; opacity: 0.58; }
+
+.brand-mark {
+  width: 27px;
+  height: 27px;
+  display: block;
+  flex: 0 0 27px;
+}
+
+.git-chips {
+  min-width: 0;
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.git-chips::-webkit-scrollbar { display: none; }
+
+.git-chip,
+.quiet-button,
+.engine-control {
+  height: 29px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-soft);
+  background: rgba(253, 252, 249, 0.86);
+  font-size: 11px;
+  font-weight: 520;
+}
+
+.git-chip { background: transparent; }
+.git-chip b { color: var(--waiting); font-weight: 650; }
+
+.toolbar { display: flex; align-items: center; gap: 7px; }
+.quiet-button { cursor: pointer; }
+.quiet-button:hover { background: var(--surface-hover); border-color: #cfc9ba; }
+.quiet-button:active { background: #e9e9ec; }
+.quiet-button[hidden] { display: none; }
+
+.engine-control { padding-right: 4px; color: var(--ink-soft); }
+.engine-control select {
+  height: 23px;
+  max-width: 96px;
+  border: 0;
+  color: var(--ink-soft);
+  background: transparent;
+  cursor: pointer;
+}
+.engine-control option { color: var(--ink); }

@@ -1,30 +1,55 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { AssetStore } from "@sessionmap/runtime/assets.ts";
 
 const root = resolve(import.meta.dir, "..");
+const appSources = ["bootstrap.js", "directory.js", "intake.js", "actions.js", "lifecycle.js"];
+const styleSources = ["foundation.css", "map.css", "intake.css", "indexes.css", "topics.css", "overlays.css"];
+
+function readWebBundle(kind: "app" | "styles"): string {
+  const sources = kind === "app" ? appSources : styleSources;
+  return sources.map((source) => readFileSync(resolve(root, "apps", "web", "src", kind, source), "utf8")).join("");
+}
 
 describe("offline browser bundle", () => {
+  test("assembles responsibility slices into the two stable public assets", () => {
+    const assets = new AssetStore();
+    const app = assets.get("app.js");
+    const styles = assets.get("styles.css");
+    expect(app?.parts).toEqual(appSources.map((source) => `app/${source}`));
+    expect(styles?.parts).toEqual(styleSources.map((source) => `styles/${source}`));
+    expect(app?.body).toBe(readWebBundle("app"));
+    expect(styles?.body).toBe(readWebBundle("styles"));
+  });
+
   test("makes history intake and manual checking explicit without turning refresh into a reset", () => {
-    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const app = readWebBundle("app");
     expect(html).toContain('id="intake-panel"');
     expect(html).toContain('id="check-now-button"');
     expect(html).toContain("新对话会从现在起持续整理");
     expect(html).toContain("不导入历史");
     expect(app).toContain('post("/api/intake/check"');
     expect(app).toContain('"/api/intake/start"');
-    expect(app).toContain("后台最多 ${job.maxParallel || 2} 路并行");
+    expect(app).toContain("历史最多 ${job.maxParallel || 2} 路并行");
     expect(app).not.toContain("localStorage.setItem(\"sessionmap.intake");
   });
 
   test("parses the vanilla browser entry as JavaScript", () => {
-    const source = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const source = readWebBundle("app");
     expect(() => new Bun.Transpiler({ loader: "js", target: "browser" }).transformSync(source)).not.toThrow();
   });
 
   test("contains no external CDN or telemetry endpoint", () => {
-    const files = ["web/index.html", "web/app.js", "web/styles.css", "web/manifest.webmanifest", "web/sessionmap-icon.svg", "web/brand-mark.svg"];
+    const files = [
+      "apps/web/src/index.html",
+      ...appSources.map((source) => `apps/web/src/app/${source}`),
+      ...styleSources.map((source) => `apps/web/src/styles/${source}`),
+      "apps/web/src/manifest.webmanifest",
+      "apps/web/src/sessionmap-icon.svg",
+      "apps/web/src/brand-mark.svg",
+    ];
     for (const file of files) {
       const source = readFileSync(resolve(root, file), "utf8");
       expect(source.replace("http://www.w3.org/2000/svg", "")).not.toMatch(/https?:\/\//);
@@ -33,8 +58,8 @@ describe("offline browser bundle", () => {
   });
 
   test("uses complete neutral provider labels instead of unverified logo artwork", () => {
-    const render = readFileSync(resolve(root, "src", "render.ts"), "utf8");
-    const assets = readFileSync(resolve(root, "src", "assets.ts"), "utf8");
+    const render = readFileSync(resolve(root, "packages", "core", "src", "render.ts"), "utf8");
+    const assets = readFileSync(resolve(root, "apps", "runtime", "src", "assets.ts"), "utf8");
     expect(render).toContain('claude: "Claude"');
     expect(render).toContain('codex: "Codex"');
     expect(render).toContain('kimi: "Kimi"');
@@ -50,8 +75,8 @@ describe("offline browser bundle", () => {
   });
 
   test("installs the same loopback map as a standalone web app", () => {
-    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
-    const manifest = JSON.parse(readFileSync(resolve(root, "web", "manifest.webmanifest"), "utf8"));
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const manifest = JSON.parse(readFileSync(resolve(root, "apps", "web", "src", "manifest.webmanifest"), "utf8"));
     expect(html).toContain('rel="manifest"');
     expect(html).toContain("/assets/sessionmap-icon.svg?v=__SESSIONMAP_ASSET_VERSION__");
     expect(manifest).toMatchObject({
@@ -62,12 +87,12 @@ describe("offline browser bundle", () => {
       theme_color: "#f5f3ed",
     });
     expect(manifest.icons[0]).toMatchObject({ type: "image/svg+xml", purpose: "any maskable" });
-    expect(readFileSync(resolve(root, "web", "app.js"), "utf8")).not.toContain("serviceWorker");
+    expect(readWebBundle("app")).not.toContain("serviceWorker");
   });
 
   test("uses one semantic branch color instead of a rainbow palette", () => {
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
-    const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    const app = readWebBundle("app");
+    const css = readWebBundle("styles");
     expect(css).toContain("--branch: #a8a195");
     expect(css).toContain("rgba(168, 161, 149, 0.38)");
     expect(css).not.toContain("markmap-link");
@@ -75,7 +100,7 @@ describe("offline browser bundle", () => {
   });
 
   test("keeps directory scrolling and outline disclosure free of canvas navigation", () => {
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const app = readWebBundle("app");
     expect(app).toContain("async function toggleDirectoryDisclosure(row)");
     expect(app).toContain("function pinDirectoryAnchor(anchor)");
     expect(app).toContain("function buildOutline(container, topic)");
@@ -87,7 +112,7 @@ describe("offline browser bundle", () => {
     expect(app).not.toContain("applySemanticZoom");
     expect(app).not.toMatch(/transform\.k\s*[<>]/);
 
-    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
     expect(html).toContain('id="directory"');
     expect(html).toContain('id="attention-index-list"');
     expect(html).toContain('id="topic-index-list"');
@@ -98,8 +123,8 @@ describe("offline browser bundle", () => {
     expect(html).not.toContain("拖动画布");
     expect(html).not.toContain('id="fit-button"');
 
-    const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
-    expect(app).toContain('label.textContent = expanded ? "收起脉络" : "脉络"');
+    const css = readWebBundle("styles");
+    expect(app).toContain('label.textContent = expanded ? "收起脉络" : "查看脉络"');
     expect(app).toContain('topicFoldKey = "sessionmap.topic-fold.v1"');
     expect(app).toContain('fold.className = "topic-fold"');
     expect(app).toContain("saveTopicFold()");
@@ -113,7 +138,7 @@ describe("offline browser bundle", () => {
   });
 
   test("keeps session rows as jump entries while the topic owns lineage disclosure", () => {
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
+    const app = readWebBundle("app");
     expect(app).not.toContain("scheduleSessionLocate");
     expect(app).not.toContain("locateSessionLineage");
     expect(app).not.toContain("is-locate-pending");
@@ -123,6 +148,17 @@ describe("offline browser bundle", () => {
     expect(app).toContain('const sessions = section.querySelector(":scope > .topic-body > .session-list")');
     expect(app).toContain("sessions.hidden = next");
     expect(app).toContain('lineageAction.classList.add("topic-lineage-action")');
+    expect(app).toContain('topicStatus.className = "topic-status"');
+    expect(app).toContain('outline.setAttribute("role", "region")');
+    expect(app).toContain('row.setAttribute("aria-controls", outlineId)');
+    expect(app).toContain('row.setAttribute("aria-controls", list.id)');
+    expect(app).toContain("decorateRows(container)");
+    expect(app).not.toContain('outline.setAttribute("role", "tree")');
+    expect(app).toContain('if (name.startsWith("state-")) topicStatus.classList.add(name)');
+    expect(app).toContain('const stateWord = headerRow.querySelector(".state-word")');
+    expect(app).toContain("headerLayout.append(lineageAction)");
+    expect(app).toContain("headerLayout.append(topicStatus)");
+    expect(app.indexOf("headerLayout.append(lineageAction)")).toBeLessThan(app.indexOf("headerLayout.append(topicStatus)"));
     expect(app).toContain("overview.hidden = !expanded");
     expect(app).toContain("await jump(row.dataset.sessionId)");
     expect(app).toContain("const pendingJumps = new Set()");
@@ -131,21 +167,31 @@ describe("offline browser bundle", () => {
     expect(app).not.toContain('toast("正在切回 session…")');
     expect(app).toContain("payload?.error || payload?.message");
 
-    const render = readFileSync(resolve(root, "src", "render.ts"), "utf8");
+    const render = readFileSync(resolve(root, "packages", "core", "src", "render.ts"), "utf8");
     expect(render).toContain('data-action="none"');
     expect(render).not.toContain('data-inline-action="locate-lineage"');
     expect(render).toContain('data-inline-action="jump-session"');
     expect(render).not.toContain('class="topic-jump-action"');
     expect(render).toContain('session.status === "closed" ? "恢复终端" : "回到终端"');
     expect(render).not.toContain('data-kind="snapshot"');
+    expect(render).toContain('<span class="thought-kicker">查看脉络</span>');
+    expect(render).toContain('class="node-type-label"');
     expect(render).toContain('data-action="fold-topic"');
     expect(render).toContain('"terminal-restore" : "terminal-return"');
     expect(render).not.toContain('"rotate-ccw" : "play"');
+
+    const css = readWebBundle("styles");
+    expect(css).toContain('.topic-lineage-action[aria-expanded="true"]');
+    expect(css).toContain(".topic-status .state-word { margin-left: 0; }");
+    expect(css).not.toContain(".topic-body::before");
+    expect(css).not.toContain(".session-entry::before");
+    expect(css).not.toContain(".topic-overview::before");
+    expect(css).toContain(".outline-node > .outline-children");
   });
 
   test("integrates actionable priority into the directory instead of a Now bar", () => {
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
-    const css = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    const app = readWebBundle("app");
+    const css = readWebBundle("styles");
     expect(app).toContain("function renderAttention(items)");
     expect(app).toContain('item.kind === "decision" || item.kind === "reply" || item.kind === "blocker"');
     expect(app).toContain('mainline.className = "attention-mainline"');
@@ -153,13 +199,18 @@ describe("offline browser bundle", () => {
     expect(app).toContain("item.detail && item.detail !== item.mainline");
     expect(app).not.toContain("renderNow(");
     expect(css).toContain(".attention-mainline");
+    expect(css).toContain('border-left-color: var(--decision)');
+    expect(css).toContain(".session-decision .session-jump-action");
+    expect(css).toContain(".directory .fm-session.session-waiting");
+    expect(css).toContain(".topic-header .fm-mainline { flex: 1 1 100%");
+    expect(css).toContain("bottom: 5px;");
     expect(css).not.toContain(".now-bar");
   });
 
   test("opens directly in any local browser and uses tickets only for CLI ready acknowledgement", () => {
-    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
-    const app = readFileSync(resolve(root, "web", "app.js"), "utf8");
-    const cli = readFileSync(resolve(root, "src", "cli.ts"), "utf8");
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const app = readWebBundle("app");
+    const cli = readFileSync(resolve(root, "apps", "runtime", "src", "cli.ts"), "utf8");
     expect(html).toContain('fragment.get("open")');
     expect(html).not.toContain('fragment.get("cap")');
     expect(app).toContain('fetch("/api/open/exchange"');
@@ -177,8 +228,8 @@ describe("offline browser bundle", () => {
   });
 
   test("versions every browser entry asset so immutable caches cannot mix releases", () => {
-    const html = readFileSync(resolve(root, "web", "index.html"), "utf8");
-    const styles = readFileSync(resolve(root, "web", "styles.css"), "utf8");
+    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const styles = readWebBundle("styles");
     for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) {
       expect(match[1]).toContain("?v=__SESSIONMAP_ASSET_VERSION__");
     }

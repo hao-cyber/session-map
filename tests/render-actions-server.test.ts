@@ -1,16 +1,16 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { ActionRouter, codexHomeForTranscript, resumeCommand, shellQuote, validSessionId } from "../src/actions.ts";
-import { AssetStore } from "../src/assets.ts";
-import { SessionMonitor } from "../src/monitor.ts";
-import { createOpenTicket } from "../src/open.ts";
-import { matchOrcaSession, stripSpinner, type OrcaSnapshot } from "../src/orca.ts";
-import { activeSessionCount, buildNowItems, renderMarkdown } from "../src/render.ts";
-import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "../src/server.ts";
-import { StateStore } from "../src/state.ts";
-import { TreeRuntime } from "../src/tree.ts";
-import { TranscriptWatcher } from "../src/watcher.ts";
+import { ActionRouter, codexHomeForTranscript, resumeCommand, shellQuote, validSessionId } from "@sessionmap/core/actions.ts";
+import { AssetStore } from "@sessionmap/runtime/assets.ts";
+import { SessionMonitor } from "@sessionmap/core/monitor.ts";
+import { createOpenTicket } from "@sessionmap/runtime/open.ts";
+import { matchOrcaSession, stripSpinner, type OrcaSnapshot } from "@sessionmap/core/orca.ts";
+import { activeSessionCount, buildNowItems, renderMarkdown } from "@sessionmap/core/render.ts";
+import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "@sessionmap/runtime/server.ts";
+import { StateStore } from "@sessionmap/core/state-store.ts";
+import { TreeRuntime } from "@sessionmap/core/tree.ts";
+import { TranscriptWatcher } from "@sessionmap/core/watcher.ts";
 import { cleanup, sessionRecord, temporaryDirectory, transcriptMeta } from "./helpers.ts";
 
 const directories: string[] = [];

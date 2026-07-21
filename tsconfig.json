@@ -3,6 +3,12 @@
     "target": "ES2022",
     "module": "Preserve",
     "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@sessionmap/core/*": ["packages/core/src/*"],
+      "@sessionmap/runtime/*": ["apps/runtime/src/*"],
+      "@sessionmap/web/*": ["apps/web/src/*"]
+    },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["bun"],
     "strict": true,
@@ -15,5 +21,5 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
+  "include": ["apps/**/*.ts", "packages/**/*.ts", "tests/**/*.ts", "scripts/**/*.ts"]
 }

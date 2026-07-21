@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createEmptyState } from "../src/state.ts";
-import { formatNow, nowItemAt, readNowSnapshot } from "../src/now.ts";
+import { createEmptyState } from "@sessionmap/core/state-repair.ts";
+import { formatNow, nowItemAt, readNowSnapshot } from "@sessionmap/runtime/now.ts";
 import { sessionRecord, temporaryDirectory } from "./helpers.ts";
 
 describe("terminal Now projection", () => {

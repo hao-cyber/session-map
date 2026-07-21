@@ -1,0 +1,12 @@
+{
+  "name": "@sessionmap/runtime",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./*": "./src/*"
+  },
+  "dependencies": {
+    "@sessionmap/core": "workspace:*",
+    "@sessionmap/web": "workspace:*"
+  }
+}

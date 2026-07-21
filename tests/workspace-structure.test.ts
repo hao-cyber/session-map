@@ -1,0 +1,98 @@
+import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+
+const root = resolve(import.meta.dir, "..");
+
+function json(path: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(resolve(root, path), "utf8")) as Record<string, unknown>;
+}
+
+function sourceFiles(directory: string): string[] {
+  const absolute = resolve(root, directory);
+  return readdirSync(absolute, { withFileTypes: true }).flatMap((entry) => {
+    const relative = `${directory}/${entry.name}`;
+    if (entry.isDirectory()) return entry.name === "vendor" ? [] : sourceFiles(relative);
+    return /\.(?:ts|js|swift|html|css)$/.test(entry.name) ? [relative] : [];
+  });
+}
+
+function imports(path: string): string[] {
+  const source = readFileSync(resolve(root, path), "utf8");
+  return [...source.matchAll(/(?:from\s+|import\s*\()(["'])([^"']+)\1/g)].map(
+    (match) => match[2]!,
+  );
+}
+
+describe("private workspace boundaries", () => {
+  test("keeps one root release version and only private source workspaces", () => {
+    const product = json("package.json");
+    expect(product.private).toBe(true);
+    expect(product.workspaces).toEqual(["apps/*", "packages/*"]);
+    expect(product.bin).toEqual({ sessionmap: "apps/runtime/src/cli.ts" });
+
+    for (const path of [
+      "apps/runtime/package.json",
+      "apps/web/package.json",
+      "apps/desktop/package.json",
+      "packages/core/package.json",
+    ]) {
+      const workspace = json(path);
+      expect(workspace.private).toBe(true);
+      expect(workspace.version).toBeUndefined();
+    }
+  });
+
+  test("allows runtime to consume core and Web without making desktop a business runtime", () => {
+    const runtime = json("apps/runtime/package.json");
+    expect(runtime.dependencies).toEqual({
+      "@sessionmap/core": "workspace:*",
+      "@sessionmap/web": "workspace:*",
+    });
+    expect(json("apps/web/package.json").dependencies).toBeUndefined();
+    expect(json("apps/desktop/package.json").dependencies).toBeUndefined();
+    expect(json("packages/core/package.json").dependencies).toBeUndefined();
+  });
+
+  test("builds the existing CLI and desktop shell from their workspace sources", () => {
+    const build = readFileSync(resolve(root, "scripts/build.ts"), "utf8");
+    const appBuild = readFileSync(resolve(root, "scripts/build-macos-app.ts"), "utf8");
+    expect(build).toContain('"apps", "runtime", "src", "cli.ts"');
+    expect(appBuild).toContain('"apps", "desktop", "src", "SessionMapApp.swift"');
+    expect(appBuild).toContain('"apps", "web", "src", "sessionmap-icon.svg"');
+  });
+
+  test("enforces source dependency direction instead of trusting manifests alone", () => {
+    for (const path of sourceFiles("packages/core/src")) {
+      for (const specifier of imports(path)) {
+        expect(specifier, `${path} must not import an app workspace`).not.toMatch(
+          /^@sessionmap\/(?:runtime|web|desktop)(?:\/|$)|(?:^|\/)apps\//,
+        );
+      }
+    }
+
+    for (const path of sourceFiles("apps/web/src")) {
+      const source = readFileSync(resolve(root, path), "utf8");
+      expect(source, `${path} must use the runtime HTTP boundary`).not.toMatch(
+        /@sessionmap\/core|node:fs|\bBun\.|state\.json|capability\.token/,
+      );
+    }
+
+    for (const path of sourceFiles("apps/desktop/src")) {
+      const source = readFileSync(resolve(root, path), "utf8");
+      expect(source, `${path} must remain a stateless display shell`).not.toMatch(
+        /@sessionmap\/core|packages\/core|state\.json|capability\.token/,
+      );
+    }
+  });
+
+  test("keeps pure state and model protocols inward of side-effect adapters", () => {
+    expect(imports("packages/core/src/state-repair.ts")).not.toContain("node:fs");
+    expect(imports("packages/core/src/state-repair.ts")).not.toContain("./state-store.ts");
+    expect(imports("packages/core/src/roll.ts")).not.toContain("./roll-engine.ts");
+    expect(imports("packages/core/src/roll-engine.ts")).toContain("./roll.ts");
+
+    const rollProtocol = readFileSync(resolve(root, "packages/core/src/roll.ts"), "utf8");
+    expect(rollProtocol).not.toMatch(/\bBun\.(?:spawn|which)|spawnSync|node:child_process/);
+  });
+});
