@@ -50,3 +50,11 @@ bun apps/runtime/src/cli.ts open --state-dir /tmp/sessionmap-demo
 - 改动持久化格式时必须提供恢复、防损坏与迁移测试。
 - 改动动作层时必须证明副作用仍只由 loopback 上的显式用户点击触发。
 - 改动视觉编码时，状态语义优先于装饰；红色只保留给需要拍板或错误级行动信号。
+
+## 发布节奏
+
+合入 `main` 不等于立即发布。仓库每天 Asia/Shanghai 22:00 检查一次：精确 HEAD 已通过
+CI、完整发布门禁再次通过，且相对最近 Release 有新源提交时，自动递增 beta 并触发签名、
+公证和双架构发布；没有变化则跳过。Release 成功后由同一 workflow 用其校验清单更新
+Homebrew tap。维护者需要立即发布时，应手动触发 `Daily release candidate`，不得手工移动
+已有 tag 或绕过 Release workflow 上传 binary。

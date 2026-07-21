@@ -59,6 +59,11 @@ brew upgrade sessionmap
 sessionmap install
 ```
 
+New beta builds are cut by GitHub Actions once per day when `main` contains new,
+fully tested code. A release is published only after the complete native build,
+install, signing, and notarization gates pass; the Homebrew tap is updated from
+that Release afterward. No source change means no empty daily release.
+
 Open the app or visit [http://127.0.0.1:4317/](http://127.0.0.1:4317/) in a local
 browser. The first launch lets you import 7, 30, or 90 days of history, start from
 a custom date, or skip old sessions. New sessions are organized in the background
@@ -132,6 +137,10 @@ sessionmap open
 brew upgrade sessionmap
 sessionmap install
 ```
+
+当 `main` 出现已经通过完整 CI 的新代码时，GitHub Actions 每天集中切割一次新 beta；只有
+双架构构建、安装冒烟、签名和 Apple 公证全部成功后才创建 Release，随后自动同步 Homebrew
+tap。当天没有新代码就不会生成空版本。
 
 安装后可以打开 App，也可以在本机浏览器访问
 [http://127.0.0.1:4317/](http://127.0.0.1:4317/)。`sessionmap open` 会帮你打开浏览器，

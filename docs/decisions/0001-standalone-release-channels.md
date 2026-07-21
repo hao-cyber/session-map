@@ -3,6 +3,9 @@
 > 状态：部分被 [ADR 0004](0004-map-document-desktop-hosts.md) 替代；standalone CLI、单写者、安装事务与回滚部分仍有效  
 > 日期：2026-07-20
 
+> 版本切割与 Homebrew 同步的手工步骤已被
+> [ADR 0015](0015-daily-tested-release-automation.md) 的每日有变更自动发布取代；本文保留首发时的背景与取舍。
+
 ## 背景与约束
 
 SessionMap 的唯一正式界面是回环 Bun 服务提供的系统浏览器页面。CLI、后台 watcher、

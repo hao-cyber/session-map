@@ -119,3 +119,20 @@
   它们未包含在本次交付中。提交失败、推送被拒或验证未通过时，继续处理或如实报告。
 - 实现与验证完成但尚未获得 Git 操作指令时，明确说明改动已完成、尚未提交或推送；
   只有实际推送成功后，才告知用户“已推送，可以关闭当前 session”。
+
+## 版本发布
+
+- `main` 的普通 push 只更新源码，不直接创建用户版本。每日 Asia/Shanghai 22:00 的
+  `Daily release candidate` workflow 只在精确 HEAD 已通过 CI、再次通过完整 `check:ci`，
+  且相对最近 Release 有新源提交时递增 beta；没有变化必须跳过。
+- 用户明确要求“发布新版”时，在代码已推送且远端 CI 成功后，优先手动触发同一个 daily
+  workflow，不另造旁路 tag 或手工上传资产。触发后必须等待并核对 Release workflow 的
+  双架构构建、安装/重启冒烟、签名、公证、Gatekeeper、来源证明与 Homebrew tap 同步。
+- 自动版本只递增当前 `vX.Y.Z-beta.N` 的 `N`。stable、major/minor/patch 变化和发布频率
+  调整必须由用户明确决定，不允许 Agent 根据改动大小自行猜测。
+- tag、tag 独占的根 `package.json` 与 CLI `--version` 必须一致；版本提交必须记录
+  `Release-Source`，不得推入或绕过受保护的 `main`。已存在 tag 不得移动或覆盖。
+- GitHub Release 是 binary 唯一事实源。Homebrew Formula 只能在 Release 成功后从同一份
+  `checksums.txt` 自动生成；tap 失败时只重跑失败 job，不改写已发布资产。
+- 只有 Release 与 tap 均成功、匿名下载校验通过，并完成至少一个真实安装/升级入口验证后，
+  才能告知用户“新版本已发布，其他人可以安装”。

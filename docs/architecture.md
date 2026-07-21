@@ -250,6 +250,13 @@ Formula 和校验安装脚本只是它的分发适配层，不直接写用户状
 和降级最终都收敛到 `sessionmap install`，由 launchd 模块原子替换稳定路径中的 binary，
 启动唯一 writer，确认 `/health` 后提交；失败则恢复旧 binary、plist 和服务。
 
+每日发布候选 workflow 在 Asia/Shanghai 22:00 检查 `main`：只有精确 HEAD 已通过 CI、
+再次通过完整发布门禁且相对最近 Release 有源代码变化时，才递增 beta 并创建不可变 tag。
+版本元数据提交由 tag 独占，不绕过受保护的 `main`；`Release-Source` trailer 保存真实源提交。
+tag 显式 dispatch 同一 Release workflow，成功发布后再从 `checksums.txt` 确定性生成并推送
+Homebrew Formula。Release 仍是唯一事实源，tap 不构建 binary，也不能反向写主仓库。完整
+失败恢复与权限取舍见 [ADR 0015](decisions/0015-daily-tested-release-automation.md)。
+
 macOS 安装包把对应架构的已签名 binary 放到系统只读来源路径，并安装一个 universal、
 无状态的 SessionMap App 壳，再以当前控制台用户身份调用统一安装事务。App 承载同一地图
 文档但不成为第二个 runtime。发布
