@@ -24,6 +24,7 @@
   const checkNowButton = document.getElementById("check-now-button");
   const gitChips = document.getElementById("git-chips");
   const engineSelect = document.getElementById("engine-select");
+  const rollUsage = document.getElementById("roll-usage");
   const archivedButton = document.getElementById("archived-button");
   const historyButton = document.getElementById("history-button");
   const archivedCount = document.getElementById("archived-count");

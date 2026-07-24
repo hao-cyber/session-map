@@ -22,13 +22,13 @@ bun run check:secrets
 涉及 UI 的改动必须针对真实渲染结果验收，不能只检查源码：
 
 ```bash
-bun apps/runtime/src/cli.ts demo --state-dir /tmp/sessionmap-demo
-SESSIONMAP_DEV=1 bun apps/runtime/src/cli.ts serve \
+bun apps/cli/src/cli.ts demo --state-dir /tmp/sessionmap-demo
+SESSIONMAP_DEV=1 bun apps/cli/src/cli.ts serve \
   --state-dir /tmp/sessionmap-demo \
   --no-watch \
   --no-open
 # 另一个终端：
-bun apps/runtime/src/cli.ts open --state-dir /tmp/sessionmap-demo
+bun apps/cli/src/cli.ts open --state-dir /tmp/sessionmap-demo
 ```
 
 至少检查首次打开、Fit、缩放 LOD、手动折叠、归档/撤销与窄浏览器窗口。截图应确认层级、间距、裁切、重叠和状态色语义。

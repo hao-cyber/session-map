@@ -9,14 +9,14 @@ macOS 极薄壳承载同一份正式地图文档。
 ## 代码入口
 
 - `packages/core/src/render.ts`：把状态投影成读取模型与安全 HTML。
-- `apps/web/src/index.html`：唯一正式地图文档的 HTML 结构。
-- `apps/web/src/app/`：bootstrap、directory、intake、actions 与 lifecycle 浏览器源码切片；
-  `apps/runtime/src/assets.ts` 按固定顺序将它们组合成 `/assets/app.js`。
-- `apps/web/src/styles/`：foundation、map、intake、indexes、topics 与 overlays 样式切片；
-  `apps/runtime/src/assets.ts` 按固定顺序将它们组合成 `/assets/styles.css`。
-- `apps/web/src/manifest.webmanifest`、`apps/web/src/sessionmap-icon.svg`：可安装窗口 metadata 与本地图标。
-- `apps/runtime/src/assets.ts`：vendored runtime 资产加载与热更新。
-- `apps/runtime/src/server.ts`：快照、事件流和回环同源边界。
+- `packages/web/src/index.html`：唯一正式地图文档的 HTML 结构。
+- `packages/web/src/app/`：bootstrap、directory、intake、actions 与 lifecycle 浏览器源码切片；
+  `apps/cli/src/assets.ts` 按固定顺序将它们组合成 `/assets/app.js`。
+- `packages/web/src/styles/`：foundation、map、intake、indexes、topics 与 overlays 样式切片；
+  `apps/cli/src/assets.ts` 按固定顺序将它们组合成 `/assets/styles.css`。
+- `packages/web/src/manifest.webmanifest`、`packages/web/src/sessionmap-icon.svg`：可安装窗口 metadata 与本地图标。
+- `apps/cli/src/assets.ts`：vendored runtime 资产加载与热更新。
+- `apps/cli/src/server.ts`：快照、事件流和回环同源边界。
 - [`../decisions/0005-integrate-attention-into-directory.md`](../decisions/0005-integrate-attention-into-directory.md)：
   删除独立 Now 条并把行动优先级整合进目录的决策。
 - [`../decisions/0007-theme-owned-lineage.md`](../decisions/0007-theme-owned-lineage.md)：
@@ -36,8 +36,8 @@ macOS 极薄壳承载同一份正式地图文档。
   不拥有或展开私有脉络，也不提供脉络按钮。`snapshot.trail` 可保留在兼容读取快照中，
   但 Web 不把它画成第二条历史。
 - 主题形成纵向 section，session 形成稳定目录行。目录使用浏览器原生纵向滚动、滚动条
-  和键盘导航；不得要求用户拖动二维画布才能找到 session。主题脉络以可折叠的缩进大纲
-  内联展开，与目录共享同一页面滚动，不设第二套平移缩放导航。
+  和键盘导航；不得要求用户拖动二维画布才能找到 session。主题脉络以可折叠的空间化
+  因果大纲内联展开，与目录共享同一页面滚动，不设第二套平移缩放导航。
 - 宽桌面左侧先显示只含 decision/reply/review/blocker 的待处理分组，再显示工作线索引。
   待处理项跳转到 session，工作线点击只滚动到同页对应主题 section，并随页面位置标记
   当前主题；两者都不保存业务状态、不改变主题顺序，也不把 session 提升为一级。窄屏
@@ -63,6 +63,8 @@ macOS 极薄壳承载同一份正式地图文档。
   或全局失败才显示 paused。“立即检查”始终是状态动作，不叫“刷新”，不得暗示清空或重跑。
 - 当前 Roll 引擎仍在检查、未安装、未登录或最近失败时，历史主按钮禁用并在原位说明原因；
   后台任务失败后状态行与进度面显示 paused 和经过截断的具体错误，不能表现成静默卡住。
+- Roll 引擎旁以低显著文字显示 CLI 精确报告的累计 token 用量，hover 解释输入、输出、
+  已计量与未报告次数。零用量且无未报告调用时隐藏；不得估算，也不得扩展成独立成本 dashboard。
 - URL fragment 只接收短期一次性 open ticket，并立即清理地址栏。Ticket 只关联 CLI
   的首次可见帧回执，不授予 snapshot 或动作权限，不写入长期浏览器凭据。
 - 页面完成首次 snapshot 与地图渲染后才发送 open ready。Ticket 过期或回执登记失败只
@@ -79,13 +81,16 @@ macOS 极薄壳承载同一份正式地图文档。
   边界与 CLI 命令。帮助内容必须随包 vendored，不请求远程内容，也不读写地图状态、主题
   披露状态或滚动位置；关闭按钮、Escape 与遮罩点击都能返回原地图。
 - Web 源码可以按职责切片，但浏览器公开入口仍只有 `/assets/app.js` 与
-  `/assets/styles.css`。组合顺序和完整 bundle hash 由 `apps/runtime/src/assets.ts` 单点拥有；开发热读、
+  `/assets/styles.css`。组合顺序和完整 bundle hash 由 `apps/cli/src/assets.ts` 单点拥有；开发热读、
   standalone 嵌入和测试必须使用同一清单，不得生成第二份手工 bundle。
 - Manifest 只声明同源根地址、standalone 窗口和 vendored 图标；不得注册 service worker、
   离线状态副本或浏览器专属业务入口。所有展示容器继续读取同一 snapshot。
 
 ## 脉络大纲排印
 
+- 脉络采用确定性的 node-link 局部布局：因果父子关系决定缩进与连接，节点持久顺序决定
+  纵向位置；不得使用刷新后漂移的力导向布局，也不得引入平移、缩放或小地图。它在感知上
+  应像思维导图，在导航上仍像可滚动文档。
 - 脉络是因果叙事，不是文件树：goal 级节点以 14px/650 作小节标题，其他节点正文不小于
   13px；每行显式显示“目标、任务、尝试、发现、决策、卡点、记录”类型词，不能要求用户
   记忆几何小点的含义。
@@ -93,7 +98,9 @@ macOS 极薄壳承载同一份正式地图文档。
   放在第二行，最多三行（line-clamp）。折叠控件钉在第一行中心，而不是整个块的中心。
 - 当前落点用“⌖ + provider”小牌标记（低对比描边 pill，置于节点标签行尾），
   安静但一眼可认；它仍是跳回对应 session 的入口。
-- 缩进为 18px/级；导线保持唯一分支色，当前路径的导线墨色加深，其余子树导线减淡。
+- 桌面缩进约 42px/级（窄屏压缩到约 28px/级）；父子节点之间同时显示纵向主干与横向
+  接线。导线保持唯一分支色，session 光标及其祖先形成的当前路径导线墨色加深，其余
+  子树导线减淡。当前落点节点使用中性表面和左侧墨色锚点，不新增状态色。
 - 导线只出现在脉络大纲内部，表示结构节点之间的因果父子关系。主题与 Sessions 目录之间
   不画纵向主干或 Session 行横向短线，避免把执行入口误读为思考树分支；二者的归属由
   主题 section、缩进、`Sessions` 标题和间距表达。
@@ -133,9 +140,9 @@ macOS 极薄壳承载同一份正式地图文档。
 - 主题脉络控件在折叠时显示“查看脉络”、展开后显示“收起脉络”。它使用标准 disclosure
   的 button、`aria-expanded` 与 `aria-controls` 关系；脉络内部是用于阅读的嵌套因果大纲，
   不声明为需要完整方向键导航和选择模型的文件 Tree View。它在同一主题 section 内
-  原地以缩进大纲披露结构树，不进入新页面、不创建 focus 模式或返回栈，也不隐藏相邻
-  主题。首次展开且尚无用户选择时，大纲只揭示当前路径（活跃节点链与 session 光标
-  祖先），其余子树保持折叠；逐节点折叠状态同样以稳定节点 ID 持久化。
+  原地以空间化因果大纲披露结构树，不进入新页面、不创建 focus 模式或返回栈，也不隐藏
+  相邻主题。首次展开且尚无用户选择时，大纲只揭示当前路径（session 光标与其因果祖先），
+  其余子树保持折叠；逐节点折叠状态同样以稳定节点 ID 持久化。
 - Session 行不提供“脉络”或“定位脉络”按钮，单击不改变任何披露状态。行尾根据实时
   终端状态显示“回到终端”或“恢复终端”；双击行执行同一终端动作，明确按钮立即执行并
   阻止事件冒泡。异步失败必须显示错误，不能留下未处理 Promise。

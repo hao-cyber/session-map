@@ -203,7 +203,7 @@ function thoughtSummaryMarkup(state: TrailState, rootId: string, sessions: Sessi
     `<span class="fm-line thought-summary" data-kind="thoughts" data-node-id="thoughts:${escapeHtml(rootId)}" data-root-id="${escapeHtml(rootId)}" data-default-fold="true" data-action="toggle">`,
     icon("locate-lineage", "主题脉络"),
     '<span class="thought-kicker">查看脉络</span>',
-    `<span class="thought-focus" hidden>${focusLabel ? `当前：${escapeMarkdown(focusLabel)}` : `${stats.nodes} 个结构节点`}</span>`,
+    `<span class="thought-focus">${focusLabel ? `当前 · ${escapeMarkdown(focusLabel)}` : `${stats.nodes} 个结构节点`}</span>`,
     stats.dead ? `<span class="thought-meta" hidden>死路 ${stats.dead}</span>` : "",
     "</span>",
   ].join("");

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { AssetStore } from "@sessionmap/runtime/assets.ts";
+import { AssetStore } from "@sessionmap/cli/assets.ts";
 
 const root = resolve(import.meta.dir, "..");
 const appSources = ["bootstrap.js", "directory.js", "intake.js", "actions.js", "lifecycle.js"];
@@ -9,7 +9,7 @@ const styleSources = ["foundation.css", "map.css", "intake.css", "indexes.css", 
 
 function readWebBundle(kind: "app" | "styles"): string {
   const sources = kind === "app" ? appSources : styleSources;
-  return sources.map((source) => readFileSync(resolve(root, "apps", "web", "src", kind, source), "utf8")).join("");
+  return sources.map((source) => readFileSync(resolve(root, "packages", "web", "src", kind, source), "utf8")).join("");
 }
 
 describe("offline browser bundle", () => {
@@ -24,7 +24,7 @@ describe("offline browser bundle", () => {
   });
 
   test("makes history intake and manual checking explicit without turning refresh into a reset", () => {
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
     const app = readWebBundle("app");
     expect(html).toContain('id="intake-panel"');
     expect(html).toContain('id="check-now-button"');
@@ -37,7 +37,7 @@ describe("offline browser bundle", () => {
   });
 
   test("opens local help from the brand without adding another product surface", () => {
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
     const app = readWebBundle("app");
     const css = readWebBundle("styles");
     expect(html).toContain('id="help-button"');
@@ -57,12 +57,12 @@ describe("offline browser bundle", () => {
 
   test("contains no external CDN or telemetry endpoint", () => {
     const files = [
-      "apps/web/src/index.html",
-      ...appSources.map((source) => `apps/web/src/app/${source}`),
-      ...styleSources.map((source) => `apps/web/src/styles/${source}`),
-      "apps/web/src/manifest.webmanifest",
-      "apps/web/src/sessionmap-icon.svg",
-      "apps/web/src/brand-mark.svg",
+      "packages/web/src/index.html",
+      ...appSources.map((source) => `packages/web/src/app/${source}`),
+      ...styleSources.map((source) => `packages/web/src/styles/${source}`),
+      "packages/web/src/manifest.webmanifest",
+      "packages/web/src/sessionmap-icon.svg",
+      "packages/web/src/brand-mark.svg",
     ];
     for (const file of files) {
       const source = readFileSync(resolve(root, file), "utf8");
@@ -73,7 +73,7 @@ describe("offline browser bundle", () => {
 
   test("uses complete neutral provider labels instead of unverified logo artwork", () => {
     const render = readFileSync(resolve(root, "packages", "core", "src", "render.ts"), "utf8");
-    const assets = readFileSync(resolve(root, "apps", "runtime", "src", "assets.ts"), "utf8");
+    const assets = readFileSync(resolve(root, "apps", "cli", "src", "assets.ts"), "utf8");
     expect(render).toContain('claude: "Claude"');
     expect(render).toContain('codex: "Codex"');
     expect(render).toContain('kimi: "Kimi"');
@@ -89,8 +89,8 @@ describe("offline browser bundle", () => {
   });
 
   test("installs the same loopback map as a standalone web app", () => {
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
-    const manifest = JSON.parse(readFileSync(resolve(root, "apps", "web", "src", "manifest.webmanifest"), "utf8"));
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
+    const manifest = JSON.parse(readFileSync(resolve(root, "packages", "web", "src", "manifest.webmanifest"), "utf8"));
     expect(html).toContain('rel="manifest"');
     expect(html).toContain("/assets/sessionmap-icon.svg?v=__SESSIONMAP_ASSET_VERSION__");
     expect(manifest).toMatchObject({
@@ -119,6 +119,8 @@ describe("offline browser bundle", () => {
     expect(app).toContain("function pinDirectoryAnchor(anchor)");
     expect(app).toContain("function buildOutline(container, topic)");
     expect(app).toContain("function outlineDefaultFold(data)");
+    expect(app).toContain('element.querySelector(".cursor")');
+    expect(app).toContain('wrap.classList.add("is-current-node")');
     expect(app).toContain("manualFold[id] = !expanded");
     expect(app).toContain("saveManualFold()");
     expect(app).not.toContain("mountOverview");
@@ -126,7 +128,7 @@ describe("offline browser bundle", () => {
     expect(app).not.toContain("applySemanticZoom");
     expect(app).not.toMatch(/transform\.k\s*[<>]/);
 
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
     expect(html).toContain('id="directory"');
     expect(html).toContain('id="attention-index-list"');
     expect(html).toContain('id="topic-index-list"');
@@ -189,6 +191,8 @@ describe("offline browser bundle", () => {
     expect(render).toContain('session.status === "closed" ? "恢复终端" : "回到终端"');
     expect(render).not.toContain('data-kind="snapshot"');
     expect(render).toContain('<span class="thought-kicker">查看脉络</span>');
+    expect(render).toContain('<span class="thought-focus">');
+    expect(render).not.toContain('class="thought-focus" hidden');
     expect(render).toContain('class="node-type-label"');
     expect(render).toContain('data-action="fold-topic"');
     expect(render).toContain('"terminal-restore" : "terminal-return"');
@@ -201,6 +205,11 @@ describe("offline browser bundle", () => {
     expect(css).not.toContain(".session-entry::before");
     expect(css).not.toContain(".topic-overview::before");
     expect(css).toContain(".outline-node > .outline-children");
+    expect(css).toContain(".outline-node > .outline-children > .outline-node::before");
+    expect(css).toContain(".outline-node.is-current-node > .fm-node");
+    expect(app).toContain("function outlineCurrentCount(data)");
+    expect(app).toContain('`⌖ ${currentCount} 个当前落点`');
+    expect(css).toContain(".outline-node .type-mark {\n  display: none;\n}");
   });
 
   test("integrates actionable priority into the directory instead of a Now bar", () => {
@@ -221,10 +230,36 @@ describe("offline browser bundle", () => {
     expect(css).not.toContain(".now-bar");
   });
 
-  test("opens directly in any local browser and uses tickets only for CLI ready acknowledgement", () => {
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+  test("shows exact Roll token usage as quiet chrome instead of a cost dashboard", () => {
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
     const app = readWebBundle("app");
-    const cli = readFileSync(resolve(root, "apps", "runtime", "src", "cli.ts"), "utf8");
+    const css = readWebBundle("styles");
+    expect(html).toContain('id="roll-usage"');
+    expect(app).toContain("renderRollUsage(data.rollUsage)");
+    expect(app).toContain("当前 Roll CLI 未返回可验证的 token usage");
+    expect(css).toContain(".roll-usage");
+  });
+
+  test("keeps the desktop workline index compact without shrinking its hit targets below the reading contract", () => {
+    const css = readWebBundle("styles");
+    expect(css).toContain("grid-template-columns: 220px minmax(0, 1fr)");
+    expect(css).toMatch(/\.attention-item\s*\{[^}]*min-height:\s*44px/s);
+    expect(css).toMatch(/#topic-index-list button\s*\{[^}]*min-height:\s*34px/s);
+  });
+
+  test("uses one compact vertical rhythm for topic ownership instead of stacked empty gaps", () => {
+    const css = readWebBundle("styles");
+    expect(css).toMatch(/\.topic-section\s*\{[^}]*margin:\s*0 0 20px/s);
+    expect(css).toMatch(/\.topic-header\s*\{[^}]*padding:\s*4px 0/s);
+    expect(css).toMatch(/\.topic-body\s*\{[^}]*padding:\s*0 0 0 24px/s);
+    expect(css).toContain(".session-list { margin-top: 0; }");
+    expect(css).toContain(".intake-panel:not([hidden]) + .directory { padding-top: 12px; }");
+  });
+
+  test("opens directly in any local browser and uses tickets only for CLI ready acknowledgement", () => {
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
+    const app = readWebBundle("app");
+    const cli = readFileSync(resolve(root, "apps", "cli", "src", "cli.ts"), "utf8");
     expect(html).toContain('fragment.get("open")');
     expect(html).not.toContain('fragment.get("cap")');
     expect(app).toContain('fetch("/api/open/exchange"');
@@ -242,7 +277,7 @@ describe("offline browser bundle", () => {
   });
 
   test("versions every browser entry asset so immutable caches cannot mix releases", () => {
-    const html = readFileSync(resolve(root, "apps", "web", "src", "index.html"), "utf8");
+    const html = readFileSync(resolve(root, "packages", "web", "src", "index.html"), "utf8");
     const styles = readWebBundle("styles");
     for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) {
       expect(match[1]).toContain("?v=__SESSIONMAP_ASSET_VERSION__");

@@ -2,8 +2,9 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
-import type { Provider, SessionRecord } from "./types.ts";
-import { controlSafe, isRecord, normalizeText, truncateChars } from "./utils.ts";
+import { MAX_SUMMARY_HINT_BYTES } from "./constants.ts";
+import type { Provider, ProviderSummaryHint, SessionRecord } from "./types.ts";
+import { controlSafe, isRecord, normalizeText, truncateBytes, truncateChars } from "./utils.ts";
 
 export type SourceKind = "append" | "snapshot";
 
@@ -16,6 +17,7 @@ export interface ProviderSource {
   mtimeMs: number;
   cwd?: string;
   title?: string;
+  summaryHint?: ProviderSummaryHint;
 }
 
 export interface ProviderIdentity {
@@ -81,7 +83,7 @@ function kimiWorkdirs(kimiHome: string): Map<string, string> {
   return result;
 }
 
-function grokMetadata(path: string): { sessionId: string; cwd: string; title: string } {
+function grokMetadata(path: string): { sessionId: string; cwd: string; title: string; summaryHint?: ProviderSummaryHint } {
   const summary = readJsonObject(join(dirname(path), "summary.json"), 512 * 1024);
   const info = summary && isRecord(summary.info) ? summary.info : {};
   let cwd = typeof info.cwd === "string" ? controlSafe(info.cwd) : "";
@@ -93,10 +95,19 @@ function grokMetadata(path: string): { sessionId: string; cwd: string; title: st
   const title = truncateChars(normalizeText(
     summary?.generated_title ?? summary?.session_summary ?? "",
   ), 100);
+  const summaryText = truncateBytes(normalizeText(summary?.session_summary), MAX_SUMMARY_HINT_BYTES, true);
+  const summaryHint = summaryText
+    ? {
+      text: summaryText,
+      version: createHash("sha256").update(`${title}\0${summaryText}`).digest("hex"),
+      ...(title ? { title } : {}),
+    }
+    : undefined;
   return {
     sessionId: safeId(info.id) || basename(dirname(path)),
     cwd,
     title,
+    ...(summaryHint ? { summaryHint } : {}),
   };
 }
 

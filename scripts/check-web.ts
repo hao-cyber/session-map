@@ -1,4 +1,4 @@
-import { AssetStore } from "@sessionmap/runtime/assets.ts";
+import { AssetStore } from "@sessionmap/cli/assets.ts";
 
 const source = new AssetStore().get("app.js")?.body;
 if (!source) throw new Error("Browser JavaScript bundle is unavailable.");

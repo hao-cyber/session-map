@@ -5,19 +5,19 @@ SessionMap 使用**私有 Bun workspace 组织的模块化单体**。`apps/` 与
 
 ```text
 apps/
-  runtime/
+  cli/
     src/            唯一 Bun CLI、服务组装、HTTP、launchd、迁移与资产嵌入
+  desktop/
+    src/            只加载同一回环地图文档的 AppKit/WKWebView 极薄壳
+packages/
+  core/
+    src/            状态、树、采集、模型滚动、session 导航证据与读取投影
   web/
     src/
       app/          按职责切分、最终合成为 /assets/app.js 的浏览器源码
       styles/       按职责切分、最终合成为 /assets/styles.css 的样式源码
       vendor/       随 standalone binary 嵌入的第三方运行时、许可证与图标
       index.html    唯一正式地图文档的 HTML 外壳
-  desktop/
-    src/            只加载同一回环地图文档的 AppKit/WKWebView 极薄壳
-packages/
-  core/
-    src/            状态、树、采集、模型滚动、session 导航证据与读取投影
 scripts/            根级检查、构建、App/installer 组装与安装脚本
 tests/              跨模块契约、Web、runtime 与发布边界测试
 docs/               产品宪章、架构、模块说明和 ADR
@@ -28,7 +28,7 @@ docs/               产品宪章、架构、模块说明和 ADR
 
 - `@sessionmap/core` 是无 HTTP、launchd 和桌面容器职责的领域与采集 package。它由唯一
   runtime 消费；拆出它是为了让依赖方向可检查，不宣称独立版本或对外 API。
-- `@sessionmap/runtime` 是唯一可执行应用。`apps/runtime/src/cli.ts` 是唯一 Bun 编译入口，
+- `@sessionmap/cli` 是唯一可执行应用。`apps/cli/src/cli.ts` 是唯一 Bun 编译入口，
   `serve`、`install`、`open`、`now` 与后台 watcher 共享同一生命周期和版本。
 - `@sessionmap/web` 是 runtime 的 vendored 资产输入，不是独立部署站点。`AssetStore` 在
   构建时嵌入资产，运行时仍只通过受保护的回环服务提供同一地图文档。
@@ -38,9 +38,9 @@ docs/               产品宪章、架构、模块说明和 ADR
 允许的源码依赖方向为：
 
 ```text
-apps/desktop ──HTTP/WKWebView──> apps/runtime ──> packages/core
-                                      │
-                                      └──build-time──> apps/web
+apps/desktop ──HTTP/WKWebView──> apps/cli ──> packages/core
+                                    │
+                                    └──build-time──> packages/web
 ```
 
 Web 不直接读取状态文件，desktop 不导入 core，core 不反向依赖任何 app。根
@@ -55,7 +55,8 @@ Web 不直接读取状态文件，desktop 不导入 core，core 不反向依赖�
 
 为控制新增复杂度，本次没有拆出更多 package，没有给 Web 增加独立 bundler/dev server，
 没有把测试分散进每个 workspace，也没有改变 root release workflow。测试多数验证跨模块
-协议，因此继续放在根 `tests/`；构建和安装编排继续由根 `scripts/` 所有。
+协议，因此继续放在根 `tests/`；构建和安装编排继续由根 `scripts/` 所有。`apps/` 只放可执行
+入口，`packages/` 放被入口消费的源码边界；不为目录对称新增 host、harness 或第二 runtime。
 
 ## 内部模块演进
 
@@ -82,5 +83,6 @@ capability、launchd label、binary 名称、App bundle id 或安装目标。回
 
 Web 切片仍可按 `AssetStore` 清单连接回单文件；完整 bundle hash、浏览器解析、standalone
 编译、App 构建和发布配置共同提供回滚证据。决策记录见
-[ADR 0013](decisions/0013-private-workspace-modular-monolith.md)，它替代了
+[ADR 0013](decisions/0013-private-workspace-modular-monolith.md) 与修订其目录命名的
+[ADR 0016](decisions/0016-align-workspaces-with-deployable-boundaries.md)；ADR 0013 替代了
 [ADR 0012](decisions/0012-keep-single-package-modular-monolith.md) 的单 package 目录选择。

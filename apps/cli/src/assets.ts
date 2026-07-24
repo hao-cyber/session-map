@@ -118,7 +118,7 @@ export class AssetStore {
   readonly development: boolean;
 
   constructor() {
-    this.webRoot = resolve(join(dirname(import.meta.path), "..", "..", "web", "src"));
+    this.webRoot = resolve(join(dirname(import.meta.path), "..", "..", "..", "packages", "web", "src"));
     this.development = process.env.SESSIONMAP_DEV === "1" && existsSync(join(this.webRoot, "index.html"));
   }
 

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { migrateLegacyState } from "@sessionmap/runtime/migration.ts";
+import { migrateLegacyState } from "@sessionmap/cli/migration.ts";
 import { createEmptyState } from "@sessionmap/core/state-repair.ts";
 import { defaultStateDirectory, legacyStateDirectory } from "@sessionmap/core/utils.ts";
 import { cleanup, temporaryDirectory } from "./helpers.ts";

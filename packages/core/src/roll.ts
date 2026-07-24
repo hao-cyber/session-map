@@ -1,5 +1,6 @@
 import {
   MAX_OPS,
+  MAX_SUMMARY_HINT_BYTES,
   MAX_SUBTREE_LINES,
   ROLL_SENTINEL,
   SESSION_PROGRESS_CHARS,
@@ -7,7 +8,7 @@ import {
   SESSION_TRAIL_ITEM_CHARS,
   SESSION_TRAIL_ITEMS,
 } from "./constants.ts";
-import type { RollOutput, SessionRecord, TrailState } from "./types.ts";
+import type { ProviderSummaryHint, RollOutput, SessionRecord, TrailState } from "./types.ts";
 import { byteLength, isRecord, truncateBytes } from "./utils.ts";
 
 function rootLines(state: TrailState, rootId: string, maxLines: number): string[] {
@@ -66,7 +67,12 @@ export function buildRollPrompt(
   state: TrailState,
   session: SessionRecord | undefined,
   delta: string,
-  options: { historical?: boolean; reconcile?: boolean } = {},
+  options: {
+    historical?: boolean;
+    reconcile?: boolean;
+    summaryHint?: ProviderSummaryHint;
+    snapshotOnly?: boolean;
+  } = {},
 ): string {
   const subtree = session?.rootId && state.nodes[session.rootId]
     ? rootLines(state, session.rootId, MAX_SUBTREE_LINES).join("\n")
@@ -79,6 +85,12 @@ export function buildRollPrompt(
     ? options.reconcile
       ? `\nHISTORICAL RECONCILIATION\n- This increment is older context discovered after newer activity was already mapped.\n- Preserve the current direction. Add only genuinely missing historical background or explicit revision relationships.\n- Do not close, unblock, rename, or refocus existing nodes based only on this older context.\n- Prefer no ops when the context is already represented. The snapshot may be clarified but must still describe the current session state.\n`
       : `\nHISTORICAL IMPORT\n- This is a chronological chunk from a user-confirmed historical session import.\n- Treat it as normal evidence in its original order; later chunks may revise it.\n`
+    : "";
+  const summaryContract = options.summaryHint
+    ? `\nPROVIDER SUMMARY HINT\n- This provider-generated summary is a bounded, non-authoritative hint for the exact current session.\n- Use it to improve snapshot.summary, snapshot.progress, snapshot.trail, and existing-mainline candidate matching.\n- Transcript evidence and the persistent tree win whenever they conflict.\n<hint>\n${truncateBytes(options.summaryHint.text, MAX_SUMMARY_HINT_BYTES)}\n</hint>\n`
+    : "";
+  const snapshotOnlyContract = options.snapshotOnly
+    ? `\nSNAPSHOT-ONLY ROUND\n- There is no new transcript evidence in this round.\n- Keep the session on its exact existing mainline, keep ask unchanged, and return ops: [].\n- Only revise snapshot fields that the provider summary clearly improves.\n`
     : "";
   return `${ROLL_SENTINEL}
 
@@ -96,6 +108,8 @@ MEMORY STANDARD
 - Labels must be concrete enough for a human to recover context in three seconds. "音量假设已证伪" is useful; "调试进展" is not.
 - Earlier beliefs are not timeless facts. Preserve revision history structurally: close an outdated attempt with why it changed, then grow the revised direction. Never silently rewrite the path.
 - If later evidence makes a previously dead or resolved path useful again, do not unblock or rewrite that closed node. Grow a new "reconsidered because ..." direction so both judgments remain intelligible.
+- Parent choice is the causal grammar of the tree. Attach a new direction beneath the existing finding, decision, blocker, or still-open task that explains why it exists. Use "mainline" only when there is no meaningful causal parent; never flatten a sequence of related turns into root-level siblings.
+- New nodes do not have ids until the runtime applies this response. When a cause and its resulting direction are both new in the same round, express the turn as one concrete causal node instead of emitting sibling grow ops that make the relationship ambiguous.
 
 ROLLING SESSION SNAPSHOT
 - snapshot is a revisable read projection, not the permanent source of truth. The tree records the non-erased thought trajectory.
@@ -121,6 +135,8 @@ RUNTIME CONTRACT
 - unblock applies only to a waiting node. resolved/dead outcomes cannot be reopened; represent reconsideration with grow.
 - ask.kind is decision, review, reply, or none. This is a semantic judgment about what the user is being asked to do now.
 ${historyContract}
+${summaryContract}
+${snapshotOnlyContract}
 
 OUTPUT SHAPE
 {"mainline":"existing or new semantic mainline","ask":{"kind":"decision|review|reply|none","hint":"short"},"snapshot":{"summary":"whole-session headline","progress":"latest meaningful state","trail":["causal breadcrumb"]},"ops":[]}
@@ -154,7 +170,7 @@ function unwrapRoll(value: unknown): RollOutput | null {
         ops: value.ops,
       };
     }
-    for (const key of ["result", "output", "content", "response"]) {
+    for (const key of ["result", "output", "content", "response", "text", "message", "item", "data"]) {
       const nested = value[key];
       if (typeof nested === "string") {
         const parsed = extractRollOutput(nested);
@@ -209,11 +225,12 @@ export function extractRollOutput(output: string): RollOutput | null {
     const direct = unwrapRoll(JSON.parse(trimmed));
     if (direct) return direct;
   } catch {}
+  let found: RollOutput | null = null;
   for (const candidate of balancedObjects(trimmed)) {
     try {
       const parsed = unwrapRoll(JSON.parse(candidate));
-      if (parsed) return parsed;
+      if (parsed) found = parsed;
     } catch {}
   }
-  return null;
+  return found;
 }

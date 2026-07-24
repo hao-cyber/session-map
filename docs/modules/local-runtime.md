@@ -7,11 +7,11 @@
 
 ## 代码入口
 
-- `apps/runtime/src/app.ts`：组装状态、watcher、动作层和 HTTP 服务。
-- `apps/runtime/src/server.ts`：回环 Web 服务、本机同源请求和 API 边界。
-- `apps/runtime/src/open.ts`：浏览器选择、短期签名 ticket 和首帧回执等待。
-- `apps/runtime/src/launchd.ts`：standalone CLI 的安装、启动、停止与健康检查。
-- `apps/runtime/src/cli.ts`、`apps/runtime/src/now.ts`：`serve`、`install`、`open`、`now`、`status` 等命令入口。
+- `apps/cli/src/app.ts`：组装状态、watcher、动作层和 HTTP 服务。
+- `apps/cli/src/server.ts`：回环 Web 服务、本机同源请求和 API 边界。
+- `apps/cli/src/open.ts`：浏览器选择、短期签名 ticket 和首帧回执等待。
+- `apps/cli/src/launchd.ts`：standalone CLI 的安装、启动、停止与健康检查。
+- `apps/cli/src/cli.ts`、`apps/cli/src/now.ts`：`serve`、`install`、`open`、`now`、`status` 等命令入口。
 - [`desktop-host.md`](desktop-host.md)：installed Web App 与 macOS 壳的容器边界。
 
 ## 不变量

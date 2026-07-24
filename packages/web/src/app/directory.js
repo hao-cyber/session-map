@@ -117,14 +117,23 @@
       if (found) return;
       const element = contentElement(descendant);
       if (!element) return;
-      if (element.classList.contains("node-active") && element.classList.contains("fm-node")) found = true;
-      else if (element.classList.contains("cursor")) found = true;
+      if (element.classList.contains("cursor") || element.querySelector(".cursor")) found = true;
     });
     return found;
   }
 
   function outlineDefaultFold(data) {
     return !outlineHasCurrent(data);
+  }
+
+  function outlineCurrentCount(data) {
+    let count = 0;
+    walk(data, (descendant) => {
+      const element = contentElement(descendant);
+      if (!element) return;
+      count += element.classList.contains("cursor") ? 1 : element.querySelectorAll(".cursor").length;
+    });
+    return count;
   }
 
   function buildOutlineNode(data) {
@@ -134,6 +143,7 @@
     if (outlineHasCurrent(data)) wrap.classList.add("is-current-path");
     const row = contentElement(data);
     if (!row) return wrap;
+    if (row.querySelector(".cursor")) wrap.classList.add("is-current-node");
     wrap.append(row);
     const children = data.children || [];
     if (!children.length) return wrap;
@@ -159,11 +169,21 @@
 
   function buildOutline(container, topic) {
     container.replaceChildren();
+    const heading = document.createElement("div");
+    heading.className = "lineage-map-head";
+    const title = document.createElement("span");
+    title.className = "lineage-map-title";
+    title.textContent = "因果脉络";
+    const key = document.createElement("span");
+    key.className = "lineage-map-key";
+    const currentCount = outlineCurrentCount(topic);
+    key.textContent = currentCount ? `⌖ ${currentCount} 个当前落点` : "暂无当前落点";
+    heading.append(title, key);
     const list = document.createElement("div");
-    list.className = "outline-children";
+    list.className = "outline-children outline-roots";
     list.setAttribute("role", "list");
     for (const child of topic.children || []) list.append(buildOutlineNode(child));
-    container.append(list);
+    container.append(heading, list);
     decorateRows(container);
   }
 
@@ -376,7 +396,28 @@
       : `${data.activeSessions} 个活跃 session · 更新于 ${relativeTime(data.updatedAt)}`;
     renderAttention(data.now || []);
     renderGit(data.git || []);
+    renderRollUsage(data.rollUsage);
     renderEngines(data.engines || [], data.engine);
     renderArchives(data.archived || []);
     renderIntake(data.intake, data.engine, data.engines || []);
+  }
+
+  function formatTokenCount(value) {
+    const count = Math.max(0, Number(value) || 0);
+    if (count < 1000) return String(Math.round(count));
+    if (count < 1000000) return `${(count / 1000).toFixed(count < 10000 ? 1 : 0)}k`;
+    return `${(count / 1000000).toFixed(count < 10000000 ? 1 : 0)}m`;
+  }
+
+  function renderRollUsage(usage) {
+    const total = Math.max(0, Number(usage?.totalTokens) || 0);
+    const measured = Math.max(0, Number(usage?.measuredCalls) || 0);
+    const unreported = Math.max(0, Number(usage?.unreportedCalls) || 0);
+    rollUsage.hidden = total === 0 && unreported === 0;
+    if (rollUsage.hidden) return;
+    rollUsage.textContent = total > 0 ? `${formatTokenCount(total)} tokens` : "token 未报告";
+    const details = total > 0
+      ? `Roll 累计 · 输入 ${formatTokenCount(usage.inputTokens)}${Number(usage.cachedInputTokens) > 0 ? `（缓存 ${formatTokenCount(usage.cachedInputTokens)}）` : ""} · 输出 ${formatTokenCount(usage.outputTokens)} · ${measured} 次已计量`
+      : "当前 Roll CLI 未返回可验证的 token usage";
+    rollUsage.title = unreported > 0 ? `${details} · ${unreported} 次未报告` : details;
   }

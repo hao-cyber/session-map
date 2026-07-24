@@ -27,7 +27,7 @@ describe("isForbiddenPath", () => {
   test("allows ordinary source, docs, and curated product assets", () => {
     expect(isForbiddenPath("packages/core/src/state-store.ts")).toBe(false);
     expect(isForbiddenPath("docs/modules/migration-release.md")).toBe(false);
-    expect(isForbiddenPath("apps/web/src/sessionmap-icon.svg")).toBe(false);
+    expect(isForbiddenPath("packages/web/src/sessionmap-icon.svg")).toBe(false);
     expect(isForbiddenPath("docs/assets/maintrail-overview.png")).toBe(false);
     expect(isForbiddenPath("package.json")).toBe(false);
     expect(isForbiddenPath(".env.example")).toBe(false);

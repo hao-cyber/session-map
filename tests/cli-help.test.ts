@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "node:path";
 
-const cli = resolve(import.meta.dir, "..", "apps", "runtime", "src", "cli.ts");
+const cli = resolve(import.meta.dir, "..", "apps", "cli", "src", "cli.ts");
 
 async function run(...args: string[]): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   const process = Bun.spawn([Bun.which("bun") || "bun", cli, ...args], {

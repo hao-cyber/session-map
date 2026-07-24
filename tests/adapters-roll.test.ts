@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { byteLength } from "@sessionmap/core/utils.ts";
 import { GIANT_LINE_BYTES, MAX_DELTA_BYTES, MAX_READ_BYTES, ROLL_SENTINEL } from "@sessionmap/core/constants.ts";
 import { providerForPath, readTranscriptDelta, stripInjectedPrefixes } from "@sessionmap/core/adapters.ts";
+import { discoverProviderSources } from "@sessionmap/core/providers.ts";
 import { buildRollPrompt, extractRollOutput } from "@sessionmap/core/roll.ts";
+import { extractTokenUsage } from "@sessionmap/core/roll-engine.ts";
 import { StateStore } from "@sessionmap/core/state-store.ts";
 import { TreeRuntime } from "@sessionmap/core/tree.ts";
 import { cleanup, temporaryDirectory, transcriptMeta, writeJsonLines } from "./helpers.ts";
@@ -56,6 +58,35 @@ describe("transcript adapters", () => {
     expect(delta.text).toContain("exec_command×1");
     expect(delta.text).toContain("tool_result:error");
     expect(delta.text).not.toContain("private output");
+  });
+
+  test("extracts a bounded Codex compaction summary without treating it as transcript evidence", () => {
+    const { path } = fixture("rollout-2026-summary-id.jsonl");
+    writeJsonLines(path, [{
+      type: "compacted",
+      timestamp: "2026-07-22T00:00:00.000Z",
+      payload: { window_id: "w1", message: "已经确认真正目标，下一步收敛发布路径" },
+    }]);
+    const delta = readTranscriptDelta(path, "codex", { sessionId: "summary-id" });
+    expect(delta.lowSignal).toBeTrue();
+    expect(delta.text).toBe("");
+    expect(delta.summaryHint?.text).toContain("收敛发布路径");
+    expect(delta.summaryHint?.version).toHaveLength(64);
+  });
+
+  test("binds Grok summary.json only to the exact sibling session source", () => {
+    const root = fixture().root;
+    const session = join(root, ".grok", "sessions", "cwd", "grok-summary-id");
+    const transcript = join(session, "updates.jsonl");
+    writeJsonLines(transcript, []);
+    writeFileSync(join(session, "summary.json"), JSON.stringify({
+      info: { id: "grok-summary-id", cwd: "/repo" },
+      generated_title: "稳定标题",
+      session_summary: "已经定位根因并等待验证",
+    }));
+    const source = discoverProviderSources(root, []).find((item) => item.sessionId === "grok-summary-id");
+    expect(source?.summaryHint).toMatchObject({ text: "已经定位根因并等待验证", title: "稳定标题" });
+    expect(source?.summaryHint?.version).toHaveLength(64);
   });
 
   test("parses Kimi context without treating checkpoints or thinking as dialogue", () => {
@@ -218,7 +249,17 @@ describe("bounded model boundary", () => {
     const wrapped = extractRollOutput(JSON.stringify({ result: JSON.stringify(object) }));
     expect(wrapped?.mainline).toBe("A");
     expect(wrapped?.snapshot).toEqual(object.snapshot);
+    expect(extractRollOutput(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(object) } }))?.mainline).toBe("A");
     expect(extractRollOutput("no object")).toBeNull();
+  });
+
+  test("extracts exact usage from structured engine wrappers without reading model text", () => {
+    const usage = extractTokenUsage(JSON.stringify({
+      result: JSON.stringify({ usage: { input_tokens: 999999, output_tokens: 999999 } }),
+      usage: { input_tokens: 120, output_tokens: 30, cache_read_input_tokens: 80 },
+    }));
+    expect(usage).toEqual({ inputTokens: 120, outputTokens: 30, totalTokens: 150, cachedInputTokens: 80 });
+    expect(extractTokenUsage("plain output")).toBeNull();
   });
 
   test("bounds the subtree and reuses a bounded mainline list in the prompt", async () => {
@@ -238,5 +279,8 @@ describe("bounded model boundary", () => {
     expect(prompt).toContain(ROLL_SENTINEL);
     expect(prompt).toContain("revisable read projection");
     expect(prompt).toContain("Never silently rewrite the path");
+    expect(prompt).toContain("Parent choice is the causal grammar of the tree");
+    expect(prompt).toContain('Use "mainline" only when there is no meaningful causal parent');
+    expect(prompt).toContain("express the turn as one concrete causal node");
   });
 });

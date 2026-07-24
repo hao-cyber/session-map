@@ -2,8 +2,8 @@ import { existsSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { ENGINE_NAMES, ROLL_TIMEOUT_MS } from "./constants.ts";
-import type { EngineAvailability, EngineName, RollOutput } from "./types.ts";
-import { truncateBytes } from "./utils.ts";
+import type { EngineAvailability, EngineName, RollEngineResult, TokenUsage } from "./types.ts";
+import { isRecord, truncateBytes } from "./utils.ts";
 import { extractRollOutput } from "./roll.ts";
 
 const ENGINE_ENV: Record<EngineName, string> = {
@@ -216,7 +216,7 @@ function spawnPlan(name: EngineName, executable: string, prompt: string): SpawnP
         "-p",
         prompt,
         "--output-format",
-        "text",
+        "json",
         "--permission-mode",
         "plan",
         "--tools",
@@ -226,7 +226,7 @@ function spawnPlan(name: EngineName, executable: string, prompt: string): SpawnP
   }
   if (name === "kimi") {
     return {
-      command: [executable, "--plan", "--quiet", "--max-steps-per-turn", "1", "-p", prompt],
+      command: [executable, "--plan", "--print", "--output-format", "stream-json", "--max-steps-per-turn", "1", "-p", prompt],
     };
   }
   return {
@@ -243,11 +243,58 @@ function spawnPlan(name: EngineName, executable: string, prompt: string): SpawnP
       "1",
       "--verbatim",
       "--output-format",
-      "plain",
+      "json",
       "-p",
       prompt,
     ],
   };
+}
+
+function tokenNumber(record: Record<string, unknown>, ...keys: string[]): number {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value) && value >= 0) return Math.floor(value);
+  }
+  return 0;
+}
+
+export function extractTokenUsage(stdout: string): TokenUsage | null {
+  const values: unknown[] = [];
+  try { values.push(JSON.parse(stdout)); } catch {}
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    try { values.push(JSON.parse(line)); } catch {}
+  }
+  const candidates: TokenUsage[] = [];
+  const visit = (value: unknown): void => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!isRecord(value)) return;
+    const inputTokens = tokenNumber(value, "input_tokens", "inputTokens", "prompt_tokens", "promptTokens");
+    const outputTokens = tokenNumber(value, "output_tokens", "outputTokens", "completion_tokens", "completionTokens");
+    const reportedTotal = tokenNumber(value, "total_tokens", "totalTokens");
+    const cachedInputTokens = tokenNumber(
+      value,
+      "cached_input_tokens",
+      "cachedInputTokens",
+      "cache_read_input_tokens",
+      "cacheReadInputTokens",
+    );
+    const totalTokens = reportedTotal || inputTokens + outputTokens;
+    if (totalTokens > 0 && (inputTokens > 0 || outputTokens > 0 || reportedTotal > 0)) {
+      candidates.push({
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+      });
+    }
+    for (const child of Object.values(value)) if (typeof child !== "string") visit(child);
+  };
+  values.forEach(visit);
+  return candidates.sort((left, right) => right.totalTokens - left.totalTokens)[0] ?? null;
 }
 
 export async function callRollEngine(
@@ -255,13 +302,14 @@ export async function callRollEngine(
   prompt: string,
   cwd: string,
   timeoutMs = ROLL_TIMEOUT_MS,
-): Promise<RollOutput> {
+): Promise<RollEngineResult> {
   const availability = (await detectEnginesAsync()).find((entry) => entry.name === name);
   const executable = availability?.path;
   if (!availability?.available || !executable) {
     throw new Error(`roll engine ${name} is not available${availability?.reason ? ` (${availability.reason})` : ""}`);
   }
   const plan = spawnPlan(name, executable, prompt);
+  if (name === "codex") plan.command.splice(plan.command.length - 1, 0, "--json");
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) if (value !== undefined) env[key] = value;
   delete env.CLAUDECODE;
@@ -304,5 +352,6 @@ export async function callRollEngine(
     throw new Error(`roll engine ${name} returned no valid JSON object`);
   }
   recentFailures.delete(name);
-  return output;
+  const usage = extractTokenUsage(stdout);
+  return { output, ...(usage ? { usage } : {}) };
 }

@@ -74,6 +74,35 @@ export interface OffsetRecord {
   cooldownUntil: number;
   skipUntilNewline?: boolean;
   ignored?: boolean;
+  summaryVersion?: string;
+}
+
+export interface ProviderSummaryHint {
+  text: string;
+  version: string;
+  title?: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens?: number;
+}
+
+export interface RollEngineResult {
+  output: RollOutput;
+  usage?: TokenUsage;
+}
+
+export interface RollUsageState {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  cachedInputTokens: number;
+  measuredCalls: number;
+  unreportedCalls: number;
+  last: null | (TokenUsage & { engine: EngineName; at: string });
 }
 
 export interface HistoryImportItem {
@@ -125,6 +154,7 @@ export interface TrailState {
   intake: IntakeState;
   archived: string[];
   engine: EngineName;
+  rollUsage: RollUsageState;
 }
 
 export interface DeleteSessionResult {
@@ -177,6 +207,7 @@ export interface FilteredDelta {
   skipUntilNewline: boolean;
   parseErrors: number;
   bytesRead: number;
+  summaryHint?: ProviderSummaryHint;
 }
 
 export interface ApplyResult {

@@ -1,13 +1,15 @@
 import { closeSync, openSync, readSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { basename, dirname } from "node:path";
 import {
   GIANT_LINE_BYTES,
   LEGACY_ROLL_SENTINELS,
   MAX_DELTA_BYTES,
   MAX_READ_BYTES,
+  MAX_SUMMARY_HINT_BYTES,
   ROLL_SENTINEL,
 } from "./constants.ts";
-import type { FilteredDelta, Provider } from "./types.ts";
+import type { FilteredDelta, Provider, ProviderSummaryHint } from "./types.ts";
 import { providerForPath as registeredProviderForPath, providerIdentityForPath, type SourceKind } from "./providers.ts";
 import {
   byteLength,
@@ -28,6 +30,7 @@ export interface ReadDeltaOptions {
   sessionId?: string;
   cwd?: string;
   title?: string;
+  summaryHint?: ProviderSummaryHint;
 }
 
 type Collected = {
@@ -39,6 +42,7 @@ type Collected = {
   cwd: string;
   selfGenerated: boolean;
   parseErrors: number;
+  summaryHint?: ProviderSummaryHint;
 };
 
 const INJECTED_PREFIXES = [
@@ -129,6 +133,18 @@ function collectClaude(row: Record<string, unknown>, result: Collected): void {
 
 function collectCodex(row: Record<string, unknown>, result: Collected): void {
   const payload = isRecord(row.payload) ? row.payload : {};
+  if (row.type === "compacted" && typeof payload.message === "string") {
+    const text = truncateBytes(normalizeText(payload.message), MAX_SUMMARY_HINT_BYTES, true);
+    if (text) {
+      result.summaryHint = {
+        text,
+        version: createHash("sha256")
+          .update(`${row.timestamp ?? ""}\0${payload.window_id ?? ""}\0${text}`)
+          .digest("hex"),
+      };
+    }
+    return;
+  }
   if (row.type === "session_meta") {
     if (typeof payload.id === "string" && payload.id) result.sessionId = payload.id;
     else if (typeof payload.session_id === "string" && payload.session_id) result.sessionId = payload.session_id;
@@ -374,6 +390,7 @@ function snapshotDelta(path: string, provider: Provider, options: ReadDeltaOptio
     skipUntilNewline: false,
     parseErrors: collected.parseErrors,
     bytesRead,
+    ...(options.summaryHint ? { summaryHint: options.summaryHint } : {}),
   };
 }
 
@@ -449,6 +466,7 @@ export function readTranscriptDelta(
   const titleLine = lastUser.split(/\r?\n/, 1)[0] ?? "";
   const title = options.title || truncateChars(normalizeText(titleLine) || `${provider}:${collected.sessionId.slice(0, 8)}`, 100);
   const lowSignal = collected.users.length === 0 && collected.assistants.length === 0 && collected.errors.length === 0;
+  const summaryHint = collected.summaryHint ?? options.summaryHint;
   return {
     meta: {
       provider,
@@ -466,5 +484,6 @@ export function readTranscriptDelta(
     skipUntilNewline,
     parseErrors: collected.parseErrors,
     bytesRead,
+    ...(summaryHint ? { summaryHint } : {}),
   };
 }

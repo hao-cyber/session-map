@@ -7,8 +7,8 @@ SessionMap CLI 与无状态 macOS 展示壳。旧名称只作为迁移桥存在�
 
 ## 代码入口
 
-- `apps/runtime/src/migration.ts`：旧状态读取、schema 修复、语义保全验证和原子落盘。
-- `apps/runtime/src/launchd.ts`：旧 writer 停止、新服务启动、健康确认与失败回滚。
+- `apps/cli/src/migration.ts`：旧状态读取、schema 修复、语义保全验证和原子落盘。
+- `apps/cli/src/launchd.ts`：旧 writer 停止、新服务启动、健康确认与失败回滚。
 - `scripts/build.ts`：当前平台的 Bun standalone CLI。
 - `scripts/build-macos-app.ts`、`apps/desktop/src/`：极薄 App 壳、universal 构建与图标。
 - `scripts/check-privacy.ts`、`scripts/check-gitleaks.ts`：候选文件与 Git 历史的隐私、凭据门禁。

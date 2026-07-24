@@ -25,21 +25,21 @@
   "type": "module",
   "description": "A persistent external thinking tree for parallel AI coding sessions",
   "bin": {
-    "sessionmap": "apps/runtime/src/cli.ts"
+    "sessionmap": "apps/cli/src/cli.ts"
   },
   "files": [
-    "apps/runtime/src",
-    "apps/web/src",
+    "apps/cli/src",
     "apps/desktop/src",
     "packages/core/src",
+    "packages/web/src",
     "docs",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
-    "dev": "SESSIONMAP_DEV=1 bun --watch apps/runtime/src/cli.ts serve",
-    "start": "bun apps/runtime/src/cli.ts serve",
+    "dev": "SESSIONMAP_DEV=1 bun --watch apps/cli/src/cli.ts serve",
+    "start": "bun apps/cli/src/cli.ts serve",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "check:web": "bun run scripts/check-web.ts",
