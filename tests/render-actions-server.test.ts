@@ -117,6 +117,7 @@ describe("safe rendering and attention ordering", () => {
       ops: [],
     });
     await store.update((state) => {
+      state.sessions[first.sessionId]!.terminalOpen = true;
       state.sessions[second.sessionId]!.status = "closed";
       state.sessions[second.sessionId]!.terminalOpen = false;
     });
