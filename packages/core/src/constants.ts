@@ -1,5 +1,5 @@
 export const APP_NAME = "sessionmap";
-export const SCHEMA_VERSION = 6;
+export const SCHEMA_VERSION = 7;
 export const DEFAULT_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4317;
 
@@ -21,6 +21,7 @@ export const HISTORY_RANGE_DAYS = [7, 30, 90] as const;
 export const MAX_READ_BYTES = 4 * 1024 * 1024;
 export const GIANT_LINE_BYTES = 2 * 1024 * 1024;
 export const MAX_DELTA_BYTES = 12 * 1024;
+export const MAX_SUMMARY_HINT_BYTES = 4 * 1024;
 export const MAX_POST_BYTES = 64 * 1024;
 export const MAX_OPS = 6;
 export const MAX_SUBTREE_LINES = 120;

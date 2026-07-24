@@ -1,5 +1,5 @@
 {
-  "name": "@sessionmap/runtime",
+  "name": "@sessionmap/cli",
   "private": true,
   "type": "module",
   "exports": {

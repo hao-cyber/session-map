@@ -11,7 +11,7 @@ rmSync(output, { force: true });
 const command = [
   process.execPath,
   "build",
-  resolve(import.meta.dir, "..", "apps", "runtime", "src", "cli.ts"),
+  resolve(import.meta.dir, "..", "apps", "cli", "src", "cli.ts"),
   "--compile",
   "--minify",
   `--outfile=${output}`,

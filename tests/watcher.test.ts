@@ -85,6 +85,70 @@ describe("watcher delivery semantics", () => {
     expect(store.snapshot().sessions["new-live"]).toBeDefined();
   });
 
+  test("processes an exact-session summary hint once and limits it to the rolling snapshot", async () => {
+    const fixture = setup();
+    await allowExistingTranscriptConsumption(fixture.store);
+    let hint: TranscriptFile["summaryHint"];
+    const source = (): TranscriptFile[] => {
+      const stat = statSync(fixture.path);
+      return [{
+        path: fixture.path,
+        provider: "claude",
+        sessionId: "watcher-session",
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+        ...(hint ? { summaryHint: hint } : {}),
+      }];
+    };
+    let calls = 0;
+    const watcher = new TranscriptWatcher(
+      fixture.store,
+      new TreeRuntime(fixture.store),
+      fixture.root,
+      undefined,
+      async (_engine, prompt) => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            mainline: "稳定主题",
+            ask: { kind: "none", hint: "" },
+            snapshot: { summary: "旧标题", progress: "旧进展", trail: [] },
+            ops: [{ op: "grow", parent: "mainline", type: "task", label: "已有脉络" }],
+          };
+        }
+        expect(prompt).toContain("SNAPSHOT-ONLY ROUND");
+        expect(prompt).toContain("PROVIDER SUMMARY HINT");
+        return {
+          output: {
+            mainline: "错误新主题",
+            ask: { kind: "decision", hint: "错误" },
+            snapshot: { summary: "更准确的标题", progress: "等待最终验证", trail: ["根因已经确认"] },
+            ops: [{ op: "grow", parent: "mainline", type: "finding", label: "不应写入" }],
+          },
+          usage: { inputTokens: 120, outputTokens: 30, totalTokens: 150 },
+        };
+      },
+      source,
+    );
+
+    await watcher.once();
+    const rootId = fixture.store.snapshot().sessions["watcher-session"]?.rootId;
+    hint = { text: "根因已经确认，当前等待最终验证", version: "hint-v1" };
+    await watcher.once();
+    await watcher.once();
+
+    const state = fixture.store.snapshot();
+    expect(calls).toBe(2);
+    expect(rootId).toBeString();
+    expect(state.roots).toEqual([rootId!]);
+    expect(state.nodes[rootId!]?.children).toHaveLength(1);
+    expect(state.sessions["watcher-session"]?.mainline).toBe("稳定主题");
+    expect(state.sessions["watcher-session"]?.ask.kind).toBe("none");
+    expect(state.sessions["watcher-session"]?.snapshot.summary).toBe("更准确的标题");
+    expect(state.offsets[fixture.path]?.summaryVersion).toBe("hint-v1");
+    expect(state.rollUsage).toMatchObject({ inputTokens: 120, outputTokens: 30, totalTokens: 150, measuredCalls: 1 });
+  });
+
   test("exposes durable byte progress while a large history session is still incomplete", async () => {
     const root = temporaryDirectory();
     directories.push(root);

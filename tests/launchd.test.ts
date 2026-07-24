@@ -11,7 +11,7 @@ import {
   launchAgentPath,
   launchArguments,
   launchdPlist,
-} from "@sessionmap/runtime/launchd.ts";
+} from "@sessionmap/cli/launchd.ts";
 import { createEmptyState } from "@sessionmap/core/state-repair.ts";
 import { defaultStateDirectory, legacyStateDirectory } from "@sessionmap/core/utils.ts";
 import { cleanup, temporaryDirectory } from "./helpers.ts";

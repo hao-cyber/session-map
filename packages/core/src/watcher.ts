@@ -27,6 +27,8 @@ import type {
   HistoryImportItem,
   OffsetRecord,
   Provider,
+  ProviderSummaryHint,
+  RollEngineResult,
   RollOutput,
   SessionRecord,
   SourceKind,
@@ -43,6 +45,7 @@ export interface TranscriptFile {
   kind?: SourceKind;
   cwd?: string;
   title?: string;
+  summaryHint?: ProviderSummaryHint;
   size: number;
   mtimeMs: number;
 }
@@ -51,7 +54,7 @@ export type RollFunction = (
   engine: EngineName,
   prompt: string,
   cwd: string,
-) => Promise<RollOutput>;
+) => Promise<RollOutput | RollEngineResult>;
 
 type Pending = { firstSeen: number; latestSize: number };
 type WorkLane = "live-new" | "live-update" | "history";
@@ -173,12 +176,14 @@ function candidateIsFresh(
   current: TrailState,
   sessionId: string,
   output: RollOutput,
+  snapshotOnly = false,
 ): boolean {
   const baseSource = base.sessions[sessionId]?.rootId ?? null;
   const currentSource = current.sessions[sessionId]?.rootId ?? null;
   if (baseSource !== currentSource || rootFingerprint(base, baseSource) !== rootFingerprint(current, currentSource)) {
     return false;
   }
+  if (snapshotOnly) return true;
   const mainline = canonicalMainline(output.mainline);
   if (!mainline) return true;
   const baseTarget = base.mainlineIndex[mainline] ?? null;
@@ -532,11 +537,16 @@ export class TranscriptWatcher {
       const stored = storedOffset(state, source);
       if (stored?.ignored) continue;
       const snapshotChanged = source.kind === "snapshot" && stored?.mtimeMs !== source.mtimeMs;
+      const summaryChanged = Boolean(
+        source.summaryHint
+        && state.sessions[source.sessionId ?? sessionIdFromPath(source.path, source.provider)]
+        && stored?.summaryVersion !== source.summaryHint.version,
+      );
       const offset = source.kind === "snapshot"
         ? (snapshotChanged ? 0 : source.size)
         : stored && stored.offset <= source.size ? stored.offset : 0;
       const available = source.size - offset;
-      if (available <= 0) {
+      if (available <= 0 && !summaryChanged) {
         this.#pending.delete(source.path);
         continue;
       }
@@ -549,7 +559,7 @@ export class TranscriptWatcher {
       // imposing the same delay makes its first reliable entry appear more
       // than a minute late before model latency is even counted.
       const firstLiveIncrement = stored === undefined;
-      const ready = force || firstLiveIncrement || source.kind === "snapshot" || available >= LINGER_BYTES || now - pending.firstSeen >= LINGER_MS;
+      const ready = force || firstLiveIncrement || summaryChanged || source.kind === "snapshot" || available >= LINGER_BYTES || now - pending.firstSeen >= LINGER_MS;
       if (ready && (force || now >= cooldownUntil)) {
         this.#enqueue({ mode: "live", lane: firstLiveIncrement ? "live-new" : "live-update", source });
       }
@@ -703,7 +713,25 @@ export class TranscriptWatcher {
       sessionId: source.sessionId ?? sessionIdFromPath(source.path, source.provider),
     };
     if (this.logger.path) this.logger.info("roll invocation started", fields);
-    const output = await this.roll(engine, prompt, this.rollDirectory);
+    const result = await this.roll(engine, prompt, this.rollDirectory);
+    const wrapped = typeof result === "object" && result !== null && "output" in result
+      ? result as RollEngineResult
+      : null;
+    const output = wrapped?.output ?? result as RollOutput;
+    if (wrapped) {
+      await this.store.update((state) => {
+        if (!wrapped.usage) {
+          state.rollUsage.unreportedCalls += 1;
+          return;
+        }
+        state.rollUsage.inputTokens += wrapped.usage.inputTokens;
+        state.rollUsage.outputTokens += wrapped.usage.outputTokens;
+        state.rollUsage.totalTokens += wrapped.usage.totalTokens;
+        state.rollUsage.cachedInputTokens += wrapped.usage.cachedInputTokens ?? 0;
+        state.rollUsage.measuredCalls += 1;
+        state.rollUsage.last = { ...wrapped.usage, engine, at: nowIso() };
+      });
+    }
     if (this.logger.path) this.logger.info("roll invocation completed", {
       ...fields,
       durationMs: Date.now() - startedAt,
@@ -716,6 +744,9 @@ export class TranscriptWatcher {
     const before = this.store.snapshot();
     const offset = storedOffset(before, source);
     const initialOffset = source.kind === "snapshot" ? 0 : offset?.offset ?? 0;
+    const summaryHint = source.summaryHint?.version !== offset?.summaryVersion
+      ? source.summaryHint
+      : undefined;
     const delta = readTranscriptDelta(source.path, source.provider, {
       offset: initialOffset,
       mtimeMs: source.mtimeMs,
@@ -723,22 +754,31 @@ export class TranscriptWatcher {
       ...(source.sessionId ? { sessionId: source.sessionId } : {}),
       ...(source.cwd ? { cwd: source.cwd } : {}),
       ...(source.title ? { title: source.title } : {}),
+      ...(summaryHint ? { summaryHint } : {}),
       ...(offset?.skipUntilNewline && initialOffset > 0 ? { skipUntilNewline: true } : {}),
     });
-    if (delta.nextOffset <= initialOffset && delta.bytesRead > 0) return;
+    if (delta.nextOffset <= initialOffset && delta.bytesRead > 0 && !delta.summaryHint) return;
     if (delta.selfGenerated) {
       await this.#serializeCommit(() => this.#commitLive(delta, true));
       return;
     }
-    if (delta.lowSignal || !delta.text) {
+    if ((delta.lowSignal || !delta.text) && !delta.summaryHint) {
       await this.#serializeCommit(() => this.#commitLive(delta, false));
       return;
     }
     let base = this.store.snapshot();
+    const snapshotOnly = delta.lowSignal || !delta.text;
+    if (snapshotOnly && !base.sessions[delta.meta.sessionId]) {
+      await this.#serializeCommit(() => this.#commitLive(delta, false));
+      return;
+    }
     this.#setActivity(item, "rolling");
     let output = await this.#invokeRoll(
       base.engine,
-      buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text),
+      buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
+        ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+        snapshotOnly,
+      }),
       source,
       "live",
       "initial",
@@ -749,10 +789,10 @@ export class TranscriptWatcher {
         const currentOffset = storedOffset(this.store.snapshot(), source);
         if ((currentOffset?.offset ?? 0) !== initialOffset) return { done: true, current: null };
         const current = this.store.snapshot();
-        if (!candidateIsFresh(base, current, delta.meta.sessionId, output)) return { done: false, current };
+        if (!candidateIsFresh(base, current, delta.meta.sessionId, output, snapshotOnly)) return { done: false, current };
         this.#setActivity(item, "committing");
         await this.#commitLive(delta, false);
-        await this.#apply(delta.meta, output);
+        await this.#apply(delta.meta, output, snapshotOnly);
         return { done: true, current: null };
       });
       if (result.done) return;
@@ -761,7 +801,10 @@ export class TranscriptWatcher {
       this.#setActivity(item, "rolling");
       output = await this.#invokeRoll(
         base.engine,
-        buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text),
+        buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
+          ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+          snapshotOnly,
+        }),
         source,
         "live",
         "stale-retry",
@@ -794,6 +837,7 @@ export class TranscriptWatcher {
       sessionId: item.sessionId,
       ...(source.cwd ? { cwd: source.cwd } : {}),
       ...(source.title ? { title: source.title } : {}),
+      ...(item.cursor === 0 && source.summaryHint ? { summaryHint: source.summaryHint } : {}),
       ...(item.skipUntilNewline && item.cursor > 0 ? { skipUntilNewline: true } : {}),
     });
     if (delta.selfGenerated) {
@@ -803,14 +847,21 @@ export class TranscriptWatcher {
       });
       return;
     }
-    if (delta.lowSignal || !delta.text) {
+    if ((delta.lowSignal || !delta.text) && !delta.summaryHint) {
       await this.#serializeCommit(() => this.#commitHistory(historyKey, historyJobId, item.cursor, delta));
       return;
     }
     let base = this.store.snapshot();
+    const snapshotOnly = delta.lowSignal || !delta.text;
+    if (snapshotOnly && !base.sessions[delta.meta.sessionId]) {
+      await this.#serializeCommit(() => this.#commitHistory(historyKey, historyJobId, item.cursor, delta));
+      return;
+    }
     const prompt = buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
       historical: true,
       reconcile: item.reconcile,
+      ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+      snapshotOnly,
     });
     this.#setActivity(work, "rolling");
     let output = await this.#invokeRoll(base.engine, prompt, source, "history", "initial");
@@ -824,10 +875,10 @@ export class TranscriptWatcher {
           || currentItem?.status !== "running" || currentItem.cursor !== item.cursor) {
           return { done: true, current: null };
         }
-        if (!candidateIsFresh(base, current, delta.meta.sessionId, output)) return { done: false, current };
+        if (!candidateIsFresh(base, current, delta.meta.sessionId, output, snapshotOnly)) return { done: false, current };
         this.#setActivity(work, "committing");
         const committed = await this.#commitHistory(historyKey, historyJobId, item.cursor, delta);
-        if (committed) await this.#apply(delta.meta, output);
+        if (committed) await this.#apply(delta.meta, output, snapshotOnly);
         return { done: true, current: null };
       });
       if (result.done) return;
@@ -840,6 +891,8 @@ export class TranscriptWatcher {
         buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
           historical: true,
           reconcile: currentItem?.reconcile ?? item.reconcile,
+          ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+          snapshotOnly,
         }),
         source,
         "history",
@@ -848,8 +901,8 @@ export class TranscriptWatcher {
     }
   }
 
-  async #apply(meta: TranscriptMeta, output: RollOutput): Promise<void> {
-    const applied = await this.runtime.applyRoll(meta, output);
+  async #apply(meta: TranscriptMeta, output: RollOutput, snapshotOnly = false): Promise<void> {
+    const applied = await this.runtime.applyRoll(meta, output, { snapshotOnly });
     if (applied.rejected.length) this.logger.warn("runtime rejected roll operations", { sessionId: meta.sessionId, rejected: applied.rejected });
   }
 
@@ -878,6 +931,12 @@ export class TranscriptWatcher {
       if (delta.skipUntilNewline) item.skipUntilNewline = true;
       else delete item.skipUntilNewline;
       if (item.kind === "snapshot") writeOffset(state, delta, false);
+      if (delta.summaryHint) {
+        const offset = state.offsets[delta.meta.path]
+          ?? Object.values(state.offsets).find((record) =>
+            record.provider === delta.meta.provider && record.sessionId === delta.meta.sessionId);
+        if (offset) offset.summaryVersion = delta.summaryHint.version;
+      }
       const complete = forcedStatus === "skipped" || item.kind === "snapshot" || item.cursor >= item.plannedSize;
       item.status = forcedStatus ?? (complete ? "complete" : "pending");
       delete item.error;
@@ -957,6 +1016,7 @@ export class TranscriptWatcher {
         cooldownUntil: Date.now() + SESSION_COOLDOWN_MS,
         ...(existing?.skipUntilNewline ? { skipUntilNewline: true } : {}),
         ...(existing?.ignored ? { ignored: true } : {}),
+        ...(existing?.summaryVersion ? { summaryVersion: existing.summaryVersion } : {}),
       };
     });
   }
@@ -977,6 +1037,7 @@ function writeOffset(state: ReturnType<StateStore["snapshot"]>, delta: FilteredD
   };
   if (delta.skipUntilNewline) record.skipUntilNewline = true;
   if (ignored) record.ignored = true;
+  if (delta.summaryHint) record.summaryVersion = delta.summaryHint.version;
   for (const [key, existing] of Object.entries(state.offsets)) {
     if (key !== delta.meta.path && existing.provider === delta.meta.provider && existing.sessionId === delta.meta.sessionId) delete state.offsets[key];
   }

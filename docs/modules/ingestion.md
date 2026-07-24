@@ -3,8 +3,9 @@
 ## 职责
 
 通过 provider registry 只读发现 Claude、Codex、Kimi、Grok 与可恢复 MiniMax CLI 的
-session source，按持久消费位置读取有界片段，并把模型输出交给状态写边界。Orca 只提供
-增强信息，不是采集或恢复的前置条件。
+session source，按持久消费位置读取有界片段，并把模型输出交给状态写边界。能够与准确
+session 身份绑定的 provider memory summary 可作为可丢弃的辅助语义输入；Orca 只提供
+增强信息。两者都不是采集或恢复的前置条件。
 
 ## 代码入口
 
@@ -22,8 +23,15 @@ session source，按持久消费位置读取有界片段，并把模型输出交
 - transcript 永远只读；不得为标记消费状态而修改来源文件。
 - 用户显式删除的 provider + session 身份必须从 inventory 计数、历史选择、live 排队和提交中
   排除；在途结果提交前再次检查，不能因 transcript 仍存在或继续增长而复活记录。
-- 完整 transcript / event log 才是采集来源。Memory、prompt history、session index 与摘要
-  不能独立驱动树生长，只能补充 cwd、title 等可验证元数据。
+- 完整 transcript / event log 才是 session 的发现与恢复来源。Memory、prompt history、
+  session index 与摘要不能独立创建 session，也不能独立驱动主题迁移或树生长。
+- Provider memory summary 只有在 registry/adapter 能把它绑定到准确的 provider + session
+  身份并判断新鲜度时，才可作为非权威的 roll hint。它可以帮助模型修订 session rolling
+  snapshot 的整体主标题、最新进展与有界因果路标，并为既有主题匹配提供候选；它不得直接
+  写状态。无法验证身份、来源或新鲜度时忽略；与 transcript 或持久轨迹冲突时以后两者为准。
+- Token 成本是一等运行约束。常态 roll 只发送有界新增 transcript、上一版 snapshot、当前
+  主题子树和少量主题候选；不得周期性重读完整 transcript。只有低置信、候选冲突、新旧摘要
+  矛盾或显式重审时才有界扩大证据窗口，并继续服从字节、消息数、调用频率和超时上限。
 - offset 只随成功提交前进，失败可重试但不得重复 grow。
 - 首次选择前只发现 provider、逻辑 session、mtime 和大小，不读取正文、不调用 roll。
   用户确认时对全部已发现 source 建立 live 高水位；“不导入历史”也必须写入该 baseline。
@@ -56,6 +64,9 @@ session source，按持久消费位置读取有界片段，并把模型输出交
 - 正式服务日志为每次外部 roll 记录 engine、mode、attempt、provider、session id、开始与完成
   时长；`attempt=stale-retry` 表示候选因语义投影变化而重算。失败记录同一身份和总耗时，
   不写 transcript 正文、prompt、模型输出或 transcript 绝对路径。
+- Roll engine 优先使用结构化输出并提取 CLI 明确报告的 input/output/total token usage；每次
+  已完成调用（包括 stale retry）的精确 usage 由同一状态写入协议累计。CLI 未报告时只累计
+  unreported 次数，不按字符或字节估算 token，也不推导金额。
 - 历史任务创建前必须确认当前 Roll 引擎已安装且已登录；不可用时拒绝启动，不得先落一个
   注定失败的 job。单次失败进入冷却，内部队列续调度不得用 force 绕过冷却反复刷日志。
 - 当前注册 provider：Claude Code `~/.claude/projects/*/*.jsonl`、Codex
@@ -72,4 +83,7 @@ session source，按持久消费位置读取有界片段，并把模型输出交
 `tests/adapters-roll.test.ts`。重启验收还应比较节点 ID 集合与 offsets，确认没有重复生长。
 首次摄取还须验证确认前零模型调用、skip baseline、范围扩展不重复、固定 history 边界、
 失败隔离与续跑、snapshot 不重复消费、手动检查不改变 coverage、不同 session 的有界并行、
-三级优先级、live 保留槽、短 commit gate 与 stale candidate 重算。
+三级优先级、live 保留槽、短 commit gate 与 stale candidate 重算。Provider summary 接入还须
+验证身份与新鲜度绑定、常态 prompt 预算、无 transcript 证据时不迁移主题/不修改永久脉络、
+summary 与 transcript 冲突时 transcript 胜出，以及 summary 缺失或损坏时无损退化。
+Usage 验证还须覆盖结构化 wrapper/JSONL、未报告降级、stale retry 计量和重启后的累计值。

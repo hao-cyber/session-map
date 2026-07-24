@@ -62,6 +62,15 @@ export function createEmptyState(engine: EngineName = "claude", at = nowIso()): 
     },
     archived: [],
     engine,
+    rollUsage: {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      cachedInputTokens: 0,
+      measuredCalls: 0,
+      unreportedCalls: 0,
+      last: null,
+    },
   };
 }
 
@@ -105,6 +114,33 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
   );
   state.revision = Math.floor(finiteNonnegative(input.revision));
   state.updatedAt = validIso(input.updatedAt, at);
+
+  const rawRollUsage = isRecord(input.rollUsage) ? input.rollUsage : null;
+  if (!rawRollUsage) repaired = true;
+  else {
+    state.rollUsage.inputTokens = Math.floor(finiteNonnegative(rawRollUsage.inputTokens));
+    state.rollUsage.outputTokens = Math.floor(finiteNonnegative(rawRollUsage.outputTokens));
+    state.rollUsage.totalTokens = Math.floor(finiteNonnegative(rawRollUsage.totalTokens));
+    state.rollUsage.cachedInputTokens = Math.floor(finiteNonnegative(rawRollUsage.cachedInputTokens));
+    state.rollUsage.measuredCalls = Math.floor(finiteNonnegative(rawRollUsage.measuredCalls));
+    state.rollUsage.unreportedCalls = Math.floor(finiteNonnegative(rawRollUsage.unreportedCalls));
+    const last = isRecord(rawRollUsage.last) ? rawRollUsage.last : null;
+    if (last) {
+      const inputTokens = Math.floor(finiteNonnegative(last.inputTokens));
+      const outputTokens = Math.floor(finiteNonnegative(last.outputTokens));
+      const totalTokens = Math.floor(finiteNonnegative(last.totalTokens, inputTokens + outputTokens));
+      state.rollUsage.last = {
+        engine: enumValue(ENGINE_NAMES, last.engine, state.engine) as EngineName,
+        inputTokens,
+        outputTokens,
+        totalTokens,
+        at: validIso(last.at, at),
+        ...(finiteNonnegative(last.cachedInputTokens) > 0
+          ? { cachedInputTokens: Math.floor(finiteNonnegative(last.cachedInputTokens)) }
+          : {}),
+      };
+    }
+  }
 
   const rawNodes = isRecord(input.nodes) ? input.nodes : {};
   if (rawNodes !== input.nodes) repaired = true;
@@ -324,6 +360,8 @@ export function repairState(input: unknown, at = nowIso()): { state: TrailState;
     };
     if (raw.skipUntilNewline === true) record.skipUntilNewline = true;
     if (raw.ignored === true) record.ignored = true;
+    const summaryVersion = optionalString(raw, "summaryVersion");
+    if (summaryVersion) record.summaryVersion = truncateChars(summaryVersion, 128);
     state.offsets[key] = record;
   }
 

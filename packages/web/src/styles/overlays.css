@@ -279,7 +279,7 @@
     padding-right: 0;
   }
   .topic-header .fm-mainline { flex: 1 1 100%; width: 100%; min-height: 40px; }
-  .topic-lineage-action { margin-left: 34px; }
+  .topic-lineage-action { max-width: calc(100% - 154px); margin-left: 34px; }
   .topic-status {
     position: absolute;
     top: auto;
@@ -290,6 +290,13 @@
     transform: none;
   }
   .topic-body { margin-left: 8px; padding-left: 14px; }
+  .lineage-map-head { align-items: baseline; padding: 8px 11px; }
+  .lineage-map-key { text-align: right; }
+  .outline-roots { padding: 12px 10px 14px; }
+  .outline-node > .outline-children { margin-left: 11px; padding-left: 17px; }
+  .outline-node > .outline-children > .outline-node::before { left: -17px; width: 16px; }
+  .outline-node .fm-node { padding-right: 7px; padding-left: 18px; }
+  .outline-node .fm-node:has(> .node-note) .node-note { margin-left: 36px; }
   .directory .fm-session { align-items: flex-start; flex-wrap: wrap; }
   .directory .session-copy { flex-basis: calc(100% - 24px); }
   .directory .session-title,

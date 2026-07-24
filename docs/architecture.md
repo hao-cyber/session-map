@@ -132,7 +132,11 @@ Roll 故意采用 at-most-once：
 Append-only JSONL 使用 byte offset；会被原子重写的 snapshot source 使用 mtime + 完整文件
 边界，二者都在应用非幂等树操作前先提交消费位置。
 
-Adapter 保留用户原文、assistant 对话文本、工具名计数与工具错误；丢弃 thinking、工具结果正文、tool_use 参数和系统注入。Memory、输入历史、索引和摘要只可用于补充 cwd / title，不能替代 provider 的恢复源。SessionMap 自己发起的 roll prompt 带固定哨兵，adapter 同时识别新旧品牌哨兵，防止升级期间自噬。
+Adapter 保留用户原文、assistant 对话文本、工具名计数与工具错误；丢弃 thinking、工具结果正文、tool_use 参数和系统注入。完整 transcript / event log 仍是唯一发现与恢复来源。能够由 provider adapter 绑定到准确 session 身份并判断新鲜度的 memory summary，可作为可丢弃的非权威 roll hint，帮助修订 rolling snapshot 和排序主题候选；它不能直接写状态，也不能在缺少 transcript 证据时迁移主题或修改永久脉络。常态 prompt 只组合有界新增 transcript、上一版 snapshot、当前子树和少量主题候选，低置信或证据冲突时才有界扩窗。完整取舍见 [ADR 0017](decisions/0017-provider-memory-summary-as-bounded-hint.md)。SessionMap 自己发起的 roll prompt 带固定哨兵，adapter 同时识别新旧品牌哨兵，防止升级期间自噬。
+
+Roll engine 使用结构化 CLI 输出承载模型结果和可选 usage。Runtime 只累计 CLI 明确报告的
+input/output/total token；未报告调用单独计数，不从 prompt 字节或输出字符估算。累计值进入
+同一个原子状态文件，并通过既有 snapshot API 低显著投影到 Roll 控件旁，不形成第二套成本状态。
 
 ## 树写边界
 

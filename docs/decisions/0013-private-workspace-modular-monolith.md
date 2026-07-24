@@ -1,6 +1,6 @@
 # ADR 0013：用私有 workspace 组织模块化单体
 
-- 状态：accepted
+- 状态：accepted；目录命名由 [ADR 0016](0016-align-workspaces-with-deployable-boundaries.md) 修订
 - 日期：2026-07-21
 - 替代：[ADR 0012](0012-keep-single-package-modular-monolith.md)
 

@@ -377,6 +377,34 @@ describe("tree write boundary", () => {
     expect(snapshot.trail.every((item) => Array.from(item).length <= SESSION_TRAIL_ITEM_CHARS)).toBeTrue();
   });
 
+  test("lets a summary-only round revise the snapshot but not topic, ask, or permanent lineage", async () => {
+    const root = temporaryDirectory();
+    directories.push(root);
+    const store = new StateStore(root);
+    const runtime = new TreeRuntime(store);
+    const meta = transcriptMeta("hint-only", root);
+    const initial = await runtime.applyRoll(meta, {
+      mainline: "稳定主题",
+      ask: { kind: "none", hint: "" },
+      snapshot: { summary: "旧标题", progress: "旧进展", trail: [] },
+      ops: [{ op: "grow", parent: "mainline", type: "task", label: "已有脉络" }],
+    });
+    const result = await runtime.applyRoll(meta, {
+      mainline: "错误新主题",
+      ask: { kind: "decision", hint: "错误 ask" },
+      snapshot: { summary: "更准确的整段标题", progress: "等待验证最终结果", trail: ["根因已经确认"] },
+      ops: [{ op: "grow", parent: "mainline", type: "finding", label: "不应写入" }],
+    }, { snapshotOnly: true });
+    const state = store.snapshot();
+    expect(state.roots).toEqual([initial.rootId]);
+    expect(state.nodes[initial.rootId]?.children).toHaveLength(1);
+    expect(state.sessions[meta.sessionId]?.mainline).toBe("稳定主题");
+    expect(state.sessions[meta.sessionId]?.ask.kind).toBe("none");
+    expect(state.sessions[meta.sessionId]?.snapshot.summary).toBe("更准确的整段标题");
+    expect(result.rejected).toContain("summary hint cannot reattach a session");
+    expect(result.rejected).toContain("summary hint cannot modify permanent lineage");
+  });
+
   test("preserves closed outcomes and represents later reconsideration as a new path", async () => {
     const store = new StateStore(directory());
     const runtime = new TreeRuntime(store);

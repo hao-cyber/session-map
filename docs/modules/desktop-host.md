@@ -8,10 +8,10 @@
 
 ## 代码入口
 
-- `apps/web/src/manifest.webmanifest`、`apps/web/src/sessionmap-icon.svg`：浏览器安装 metadata 与本地图标。
+- `packages/web/src/manifest.webmanifest`、`packages/web/src/sessionmap-icon.svg`：浏览器安装 metadata 与本地图标。
 - `apps/desktop/src/SessionMapApp.swift`、`apps/desktop/src/Info.plist`：AppKit/WKWebView 极薄壳。
 - `scripts/build-macos-app.ts`：原生架构或 universal App bundle 构建、图标和本地签名。
-- `apps/runtime/src/now.ts`、`apps/runtime/src/cli.ts`：行动优先级的只读终端投影与编号跳转入口。
+- `apps/cli/src/now.ts`、`apps/cli/src/cli.ts`：行动优先级的只读终端投影与编号跳转入口。
 - [`../decisions/0004-map-document-desktop-hosts.md`](../decisions/0004-map-document-desktop-hosts.md)：
   容器所有权、失败与回滚决策。
 

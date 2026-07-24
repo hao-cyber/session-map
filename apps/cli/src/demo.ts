@@ -52,9 +52,19 @@ export async function seedDemo(store: StateStore, runtime: TreeRuntime, cwd = pr
     },
     ops: [
       { op: "close", node: audioCursor, state: "dead", note: "关闭蓝牙后仍可复现" },
-      { op: "grow", parent: "mainline", type: "finding", label: "音量假设已证伪" },
-      { op: "grow", parent: "mainline", type: "task", label: "追踪音频路由切换" },
+      { op: "grow", parent: audioCursor, type: "finding", label: "音量假设已证伪" },
     ],
+  });
+  audioCursor = store.snapshot().sessions[audio.sessionId]!.cursor!;
+  await apply(runtime, audio, {
+    mainline: "修复手表录音断续",
+    ask: { kind: "none", hint: "" },
+    snapshot: {
+      summary: "定位手表录音断续根因",
+      progress: "已转向追踪系统音频路由切换",
+      trail: ["蓝牙音量不是根因", "新证据指向系统路由", "下一步抓取真机路由日志"],
+    },
+    ops: [{ op: "grow", parent: audioCursor, type: "task", label: "追踪音频路由切换" }],
   });
   audioCursor = store.snapshot().sessions[audio.sessionId]!.cursor!;
   await apply(runtime, audio, {

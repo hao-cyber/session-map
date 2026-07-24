@@ -2,12 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { ActionRouter, codexHomeForTranscript, resumeCommand, shellQuote, validSessionId } from "@sessionmap/core/actions.ts";
-import { AssetStore } from "@sessionmap/runtime/assets.ts";
+import { AssetStore } from "@sessionmap/cli/assets.ts";
 import { SessionMonitor } from "@sessionmap/core/monitor.ts";
-import { createOpenTicket } from "@sessionmap/runtime/open.ts";
+import { createOpenTicket } from "@sessionmap/cli/open.ts";
 import { matchOrcaSession, stripSpinner, type OrcaSnapshot } from "@sessionmap/core/orca.ts";
 import { activeSessionCount, buildNowItems, renderMarkdown } from "@sessionmap/core/render.ts";
-import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "@sessionmap/runtime/server.ts";
+import { SessionMapHttpServer, allowedOrigin, ensureCapabilityToken, validJsonMediaType } from "@sessionmap/cli/server.ts";
 import { StateStore } from "@sessionmap/core/state-store.ts";
 import { TreeRuntime } from "@sessionmap/core/tree.ts";
 import { TranscriptWatcher } from "@sessionmap/core/watcher.ts";
@@ -153,6 +153,8 @@ describe("safe rendering and attention ordering", () => {
     expect(lines.indexOf(secondLine)).toBeGreaterThan(summary);
     expect(lines[summary]).toContain('data-default-fold="true"');
     expect(lines[summary]).toContain("主题脉络");
+    expect(lines[summary]).toContain("当前 · 验证授权入口");
+    expect(lines[summary]).not.toContain('class="thought-focus" hidden');
     expect(summary).toBeLessThan(thought);
     expect(lines[thought]).toStartWith("    - ");
     expect(markdown).not.toContain('data-kind="snapshot"');
@@ -567,7 +569,9 @@ describe("local HTTP security boundary", () => {
     const { server } = await runningServer();
     const response = await fetch(`${server.url}/api/snapshot`);
     expect(response.status).toBe(200);
-    expect((await response.json()).markdown).toContain("SessionMap");
+    const snapshot = await response.json();
+    expect(snapshot.markdown).toContain("SessionMap");
+    expect(snapshot.rollUsage).toMatchObject({ totalTokens: 0, measuredCalls: 0, unreportedCalls: 0 });
   });
 
   test("exposes a minimal loopback health check", async () => {

@@ -302,6 +302,7 @@ export class SessionMapHttpServer {
       git: this.dependencies.monitor.gitChips(),
       archived: archivedRows(state),
       engine: state.engine,
+      rollUsage: state.rollUsage,
       engines: engineAvailabilitySnapshot().map(({ name, available, reason }) => ({ name, available, ...(reason ? { reason } : {}) })),
       intake: this.dependencies.watcher?.intakeView() ?? {
         phase: state.intake.phase,

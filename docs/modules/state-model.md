@@ -2,7 +2,8 @@
 
 ## 职责
 
-维护工作主线、session、因果脉络、归档、显式删除排除标记、live offset、历史摄取任务和 rolling snapshot 的唯一持久状态。
+维护工作主线、session、因果脉络、归档、显式删除排除标记、live offset、summary hint 版本、
+历史摄取任务、rolling snapshot 与 Roll token usage 的唯一持久状态。
 本模块实现“不可抹除的思考轨迹 + 可修订的当前快照”，但不替模型决定语义。
 
 ## 代码入口
@@ -26,6 +27,9 @@
   `--state-dir`、demo、once 与安装路径，禁止真实主题/session/脉络进入仓库工作树。
 - 已关闭判断不能原地复活；新证据必须生长新方向并保留修订关系。
 - 一个 transcript offset 至多消费一次；提交状态必须原子替换。
+- 每个可验证 summary hint 版本至多处理一次；hint 游标与 transcript offset 同属 provider +
+  session 的消费状态。Roll token 只累计 CLI 结构化输出明确报告的数值，未报告调用单独计数，
+  不进行估算或价格换算。
 - `intake.phase`、coverage、imported 逻辑 session 与 history job 同住 `state.json`；浏览器不
   持有导入事实。History item 的 cursor 与 live offset 分离，两者都只能单调前进；history
   item 的 `retryCount` / `retryAt` 和 job 的 `lastProgressAt` 是耐久恢复与停滞解释依据，UI

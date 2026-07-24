@@ -6,8 +6,8 @@
     "baseUrl": ".",
     "paths": {
       "@sessionmap/core/*": ["packages/core/src/*"],
-      "@sessionmap/runtime/*": ["apps/runtime/src/*"],
-      "@sessionmap/web/*": ["apps/web/src/*"]
+      "@sessionmap/cli/*": ["apps/cli/src/*"],
+      "@sessionmap/web/*": ["packages/web/src/*"]
     },
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["bun"],

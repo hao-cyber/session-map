@@ -171,7 +171,15 @@
   background: transparent;
 }
 .thought-kicker { color: var(--ink-soft); font-size: 11px; font-weight: 700; letter-spacing: 0.04em; }
-.thought-focus { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.thought-focus {
+  min-width: 0;
+  max-width: min(26vw, 300px);
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+}
 .thought-meta { margin-left: auto; color: var(--ink-soft); font-size: 10px; font-weight: 650; }
 .fm-node {
   min-height: 32px;

@@ -169,6 +169,13 @@ textarea:focus-visible {
 .git-chip b { color: var(--waiting); font-weight: 650; }
 
 .toolbar { display: flex; align-items: center; gap: 7px; }
+.roll-usage {
+  color: var(--muted);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.roll-usage[hidden] { display: none; }
 .quiet-button { cursor: pointer; }
 .quiet-button:hover { background: var(--surface-hover); border-color: #cfc9ba; }
 .quiet-button:active { background: #e9e9ec; }

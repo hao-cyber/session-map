@@ -127,12 +127,45 @@ function createSession(meta: TranscriptMeta, at: string): SessionRecord {
 export class TreeRuntime {
   constructor(readonly store: StateStore) {}
 
-  async applyRoll(meta: TranscriptMeta, rawOutput: RollOutput): Promise<ApplyResult> {
+  async applyRoll(
+    meta: TranscriptMeta,
+    rawOutput: RollOutput,
+    options: { snapshotOnly?: boolean } = {},
+  ): Promise<ApplyResult> {
     return this.store.update((state) => {
       if (sessionIsExcluded(state, meta.provider, meta.sessionId)) {
         return { mainline: "", rootId: "", reattached: false, accepted: 0, rejected: ["session is excluded"] };
       }
       const at = nowIso();
+      const previous = state.sessions[meta.sessionId];
+      if (options.snapshotOnly) {
+        if (!previous?.mainline || !previous.rootId || !state.nodes[previous.rootId]) {
+          return { mainline: "", rootId: "", reattached: false, accepted: 0, rejected: ["summary hint cannot create a session"] };
+        }
+        const rejected: string[] = [];
+        if (canonicalMainline(rawOutput.mainline) !== previous.mainline) rejected.push("summary hint cannot reattach a session");
+        if (Array.isArray(rawOutput.ops) && rawOutput.ops.length) rejected.push("summary hint cannot modify permanent lineage");
+        if (isRecord(rawOutput.ask)
+          && (rawOutput.ask.kind !== previous.ask.kind || normalizeText(rawOutput.ask.hint) !== previous.ask.hint)) {
+          rejected.push("summary hint cannot change ask state");
+        }
+        state.sessions[meta.sessionId] = {
+          ...previous,
+          path: meta.path,
+          cwd: meta.cwd || previous.cwd,
+          title: meta.title || previous.title,
+          lastUser: meta.lastUser || previous.lastUser,
+          snapshot: validSnapshot(rawOutput.snapshot, previous.snapshot, meta.title || previous.title, at),
+          updatedAt: at,
+        };
+        return {
+          mainline: previous.mainline,
+          rootId: previous.rootId,
+          reattached: false,
+          accepted: 0,
+          rejected,
+        };
+      }
       const mainline = canonicalMainline(rawOutput.mainline);
       if (!mainline) throw new Error("roll output has an empty mainline");
 
@@ -145,20 +178,20 @@ export class TreeRuntime {
         state.mainlineIndex[mainline] = root.id;
       }
 
-      const previous = state.sessions[meta.sessionId] ?? createSession(meta, at);
-      const reattached = Boolean(previous.rootId && previous.rootId !== rootId);
+      const currentSession = previous ?? createSession(meta, at);
+      const reattached = Boolean(currentSession.rootId && currentSession.rootId !== rootId);
       const session: SessionRecord = {
-        ...previous,
+        ...currentSession,
         provider: meta.provider,
         path: meta.path,
-        cwd: meta.cwd || previous.cwd,
-        title: meta.title || previous.title,
-        lastUser: meta.lastUser || previous.lastUser,
+        cwd: meta.cwd || currentSession.cwd,
+        title: meta.title || currentSession.title,
+        lastUser: meta.lastUser || currentSession.lastUser,
         mainline,
         rootId,
-        cursor: previous.rootId === rootId && previous.cursor ? previous.cursor : rootId,
+        cursor: currentSession.rootId === rootId && currentSession.cursor ? currentSession.cursor : rootId,
         ask: validAsk(rawOutput.ask),
-        snapshot: validSnapshot(rawOutput.snapshot, previous.snapshot, meta.title || previous.title, at),
+        snapshot: validSnapshot(rawOutput.snapshot, currentSession.snapshot, meta.title || currentSession.title, at),
         lastTranscriptAt: new Date(meta.mtimeMs).toISOString(),
         updatedAt: at,
       };
