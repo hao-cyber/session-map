@@ -4,7 +4,7 @@ import { delimiter, join } from "node:path";
 import { ENGINE_NAMES, ROLL_TIMEOUT_MS } from "./constants.ts";
 import type { EngineAvailability, EngineName, RollEngineResult, TokenUsage } from "./types.ts";
 import { isRecord, truncateBytes } from "./utils.ts";
-import { extractRollOutput } from "./roll.ts";
+import { extractRollOutput } from "./roll-contract.ts";
 
 const ENGINE_ENV: Record<EngineName, string> = {
   claude: "SESSIONMAP_CLAUDE",

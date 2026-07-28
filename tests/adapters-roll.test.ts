@@ -5,7 +5,8 @@ import { byteLength } from "@sessionmap/core/utils.ts";
 import { GIANT_LINE_BYTES, MAX_DELTA_BYTES, MAX_READ_BYTES, ROLL_SENTINEL } from "@sessionmap/core/constants.ts";
 import { providerForPath, readTranscriptDelta, stripInjectedPrefixes } from "@sessionmap/core/adapters.ts";
 import { discoverProviderSources } from "@sessionmap/core/providers.ts";
-import { buildRollPrompt, extractRollOutput } from "@sessionmap/core/roll.ts";
+import { extractRollOutput, ROLL_OUTPUT_SHAPE } from "@sessionmap/core/roll-contract.ts";
+import { buildRollPrompt } from "@sessionmap/core/roll.ts";
 import { extractTokenUsage } from "@sessionmap/core/roll-engine.ts";
 import { StateStore } from "@sessionmap/core/state-store.ts";
 import { TreeRuntime } from "@sessionmap/core/tree.ts";
@@ -250,6 +251,8 @@ describe("bounded model boundary", () => {
     expect(wrapped?.mainline).toBe("A");
     expect(wrapped?.snapshot).toEqual(object.snapshot);
     expect(extractRollOutput(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify(object) } }))?.mainline).toBe("A");
+    expect(extractRollOutput(JSON.stringify({ mainline: "A", ops: [] }))?.ask).toEqual({ kind: "none", hint: "" });
+    expect(extractRollOutput(JSON.stringify({ mainline: "A" }))).toBeNull();
     expect(extractRollOutput("no object")).toBeNull();
   });
 
@@ -282,5 +285,6 @@ describe("bounded model boundary", () => {
     expect(prompt).toContain("Parent choice is the causal grammar of the tree");
     expect(prompt).toContain('Use "mainline" only when there is no meaningful causal parent');
     expect(prompt).toContain("express the turn as one concrete causal node");
+    expect(prompt).toContain(ROLL_OUTPUT_SHAPE);
   });
 });

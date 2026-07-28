@@ -14,7 +14,9 @@
 - `packages/core/src/state-store.ts`：唯一状态加载/更新入口、Git worktree 防护、revision、
   串行更新与 fsync + rename 原子替换。
 - `packages/core/src/instance-lock.ts`：唯一 Bun runtime 进程锁；不读取或解释业务状态。
-- `packages/core/src/tree.ts`：节点生长、修订、关闭、归档和撤销边界。
+- `packages/core/src/tree.ts`：session 归属、snapshot、归档、删除和唯一树写入事务边界。
+- `packages/core/src/tree-roll.ts`：在 TreeRuntime 事务内部解释节点 grow、close、block、unblock、
+  rename 与 refocus；不直接读取或写入 StateStore。
 - `packages/core/src/constants.ts`：schema 与有界输入常量。
 
 ## 不变量
@@ -39,6 +41,8 @@
 - Session 的 `firstSeenAt` 只在首次创建时写入，后续活动不得改写；旧状态缺失该字段时
   以已有 `lastTranscriptAt` 修复并持久化，不改变 session 对象、归属或 offset。
 - runtime 只校验 ID、schema、边界和副作用，不自行猜测语义。
+- 树 op interpreter 只能由 TreeRuntime 在既有 `StateStore.update` 草稿上调用；它不是第二个
+  写入者、公开 facade 或可绕过 session 归属检查的入口。
 - 状态修复只产生归一化后的内存对象；只有 StateStore 可以把它持久化。InstanceLock 只保护
   唯一 runtime 生命周期，不成为第二个状态或写入协议。
 

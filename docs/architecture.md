@@ -49,13 +49,13 @@ Claude / Codex / Kimi / Grok / MiniMax provider source（只读）
         │
         ▼
 keyed bounded roll workers
-        │  同 session 有序、不同 session 有界并行，得到候选 mainline / ask / ops
+        │  同 session 有序、不同 session 有界并行；统一 roll contract 校验候选 mainline / ask / snapshot / ops
         ▼
 串行 commit gate
-        │  只校验并原子提交；过期候选释放 gate 后用最新状态重算
+        │  watcher 只校验并原子提交；纯 candidate loop 在 gate 外用最新状态有界重算
         ▼
 Tree runtime（唯一写者）
-        │  写边界、状态机、offset-before-apply、原子落盘
+        │  在同一个 StateStore.update 中调用内部 op interpreter，守住写边界与状态机
         ▼
 state.json + open 回执签名密钥
         │
@@ -71,7 +71,9 @@ history，同一逻辑 session 仍严格串行。模型输出只是候选，所�
 串行 commit gate；候选依赖的主线已变化时释放 gate，再用最新状态有界重算。
 Roll CLI 是 one-shot、无状态执行器；树和 offset 才是持久状态来源。完整取舍见
 [ADR 0008](decisions/0008-bounded-parallel-rolls.md) 与
-[ADR 0014](decisions/0014-short-commit-gate-and-priority-lanes.md)。
+[ADR 0014](decisions/0014-short-commit-gate-and-priority-lanes.md)。模型 JSON 契约、过期候选循环和
+树操作解释分别是无持久状态的内部机制，不拥有队列、cursor 或第二条写入路径；边界取舍见
+[ADR 0018](decisions/0018-explicit-roll-contract-and-internal-interpreters.md)。
 
 ## 轨迹与滚动快照
 
@@ -150,6 +152,9 @@ input/output/total token；未报告调用单独计数，不从 prompt 字节或
 - 自环或重复 children。
 
 Session 从一条主线 reattach 到另一条主线的当轮，既有节点全部只读，只允许在新主线 grow 或把光标 refocus 到合法节点。这能阻止模型借“换主线”越权重写另一棵树。
+
+`tree-roll.ts` 只解释并修改传入的内存草稿，不加载或持久化状态；`TreeRuntime.applyRoll`
+仍在唯一的 `StateStore.update` 事务中完成 session 归属、snapshot 更新、op 应用和原子替换。
 
 ## 对象恒存、历史与归档
 

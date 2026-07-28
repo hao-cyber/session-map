@@ -66,8 +66,11 @@ Web 不直接读取状态文件，desktop 不导入 core，core 不反向依赖�
 - 状态职责已分为 `state-repair.ts`、`state-store.ts` 与 `instance-lock.ts`：修复保持纯内存
   归一化，StateStore 继续独占串行原子写入，进程锁只保护唯一 runtime 生命周期。旧
   `state.ts` 不保留 facade 或兼容 re-export。
-- 模型滚动已分为 `roll.ts` 的 prompt/JSON 协议和 `roll-engine.ts` 的 CLI 探测/执行。
-  watcher 仍是唯一编排者，引擎结果仍须经过同一协议校验后才能进入串行 commit gate。
+- 模型滚动按已存在的变化原因分为 `roll.ts` 的语义 prompt、`roll-contract.ts` 的唯一 JSON
+  契约/解析和 `roll-engine.ts` 的 CLI 探测/执行；没有新增 package 或 facade。
+- 重复的 live/history stale 重算收敛到无状态 `roll-candidate.ts`，树 op 解释收敛到
+  `tree-roll.ts`。watcher 仍独占队列、cursor 和 commit gate，TreeRuntime 仍独占同一
+  `StateStore.update` 写入事务；内部模块不能直接持久化状态。
 - `watcher.ts` 较长，但 inventory、history/live 调度、keyed worker 与串行 commit gate
   共同守住顺序和单写者协议，当前保持一个所有者。只有其中出现可独立测试、因不同原因
   变化且不共享队列/提交事务的职责，或持续越界修改时，才重新评估拆分。
@@ -86,3 +89,5 @@ Web 切片仍可按 `AssetStore` 清单连接回单文件；完整 bundle hash�
 [ADR 0013](decisions/0013-private-workspace-modular-monolith.md) 与修订其目录命名的
 [ADR 0016](decisions/0016-align-workspaces-with-deployable-boundaries.md)；ADR 0013 替代了
 [ADR 0012](decisions/0012-keep-single-package-modular-monolith.md) 的单 package 目录选择。
+Roll 内部职责提取的边界与回滚记录见
+[ADR 0018](decisions/0018-explicit-roll-contract-and-internal-interpreters.md)。
