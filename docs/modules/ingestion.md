@@ -13,10 +13,14 @@ session 身份绑定的 provider memory summary 可作为可丢弃的辅助语�
 - `packages/core/src/watcher.ts`：metadata inventory、首次 baseline、历史任务、监听去抖、keyed worker 与串行提交闸门。
 - `packages/core/src/adapters.ts`：不同 transcript 格式的只读适配。
 - `packages/core/src/providers.ts`：provider 的发现目录、source 形态、身份与恢复协议注册表。
-- `packages/core/src/roll.ts`：有界 prompt、模型 JSON 协议、输出校验与 rolling snapshot；
-  不探测或启动外部程序。
+- `packages/core/src/roll.ts`：组装有界语义 prompt、当前子树与 rolling snapshot；不探测或
+  启动外部程序。
+- `packages/core/src/roll-contract.ts`：唯一的 prompt-visible JSON/操作契约与兼容输出解析；
+  只做结构归一化，不决定 session 归属或脉络语义。
+- `packages/core/src/roll-candidate.ts`：候选所依赖投影的纯新鲜度判断和有界 stale retry；
+  不拥有队列、cursor、commit gate 或持久状态。
 - `packages/core/src/roll-engine.ts`：模型 CLI 的安装/登录探测、调用计划、超时、失败冷却和
-  进程执行；只返回经 `roll.ts` 协议校验的候选输出。
+  进程执行；只返回经 `roll-contract.ts` 校验的候选输出。
 
 ## 不变量
 
@@ -60,7 +64,7 @@ session 身份绑定的 provider memory summary 可作为可丢弃的辅助语�
 - 初始命令行没有 session ID 时，关联必须依赖可验证的打开文件、PID、TTY 等证据。
 - 模型不可用或输出无效时保留既有地图，不伪造语义更新。
 - 模型协议不依赖具体 CLI；外部引擎执行只能通过 roll-engine 接入，且不能绕过 roll 的
-  有界输入和输出校验。roll-engine 无持久业务状态，失败冷却只影响可用性投影。
+  有界输入和 roll-contract 的输出校验。roll-engine 无持久业务状态，失败冷却只影响可用性投影。
 - 正式服务日志为每次外部 roll 记录 engine、mode、attempt、provider、session id、开始与完成
   时长；`attempt=stale-retry` 表示候选因语义投影变化而重算。失败记录同一身份和总耗时，
   不写 transcript 正文、prompt、模型输出或 transcript 绝对路径。
@@ -79,7 +83,7 @@ session 身份绑定的 provider memory summary 可作为可丢弃的辅助语�
 
 ## 验证
 
-主要覆盖在 `tests/monitor.test.ts`、`tests/watcher.test.ts` 和
+主要覆盖在 `tests/monitor.test.ts`、`tests/watcher.test.ts`、`tests/roll-candidate.test.ts` 和
 `tests/adapters-roll.test.ts`。重启验收还应比较节点 ID 集合与 offsets，确认没有重复生长。
 首次摄取还须验证确认前零模型调用、skip baseline、范围扩展不重复、固定 history 边界、
 失败隔离与续跑、snapshot 不重复消费、手动检查不改变 coverage、不同 session 的有界并行、

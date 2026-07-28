@@ -12,11 +12,11 @@ import {
   MAX_ROLL_CONCURRENCY,
   POLL_MS,
   SESSION_COOLDOWN_MS,
-  STALE_RETRY_LIMIT,
 } from "./constants.ts";
 import { readTranscriptDelta, sessionIdFromPath } from "./adapters.ts";
 import { Logger } from "./logger.ts";
 import { callRollEngine } from "./roll-engine.ts";
+import { candidateIsFresh, runRollCandidateLoop } from "./roll-candidate.ts";
 import { buildRollPrompt } from "./roll.ts";
 import { StateStore } from "./state-store.ts";
 import { sessionIdentity, sessionIsExcluded, TreeRuntime } from "./tree.ts";
@@ -35,7 +35,7 @@ import type {
   TrailState,
   TranscriptMeta,
 } from "./types.ts";
-import { canonicalMainline, nowIso, sleep } from "./utils.ts";
+import { nowIso, sleep } from "./utils.ts";
 import { discoverProviderSources, type ProviderSource } from "./providers.ts";
 
 export interface TranscriptFile {
@@ -134,69 +134,6 @@ function dedupeSources(files: ProviderSource[]): TranscriptFile[] {
     if (!logicalSessions.has(key)) logicalSessions.set(key, file);
   }
   return [...logicalSessions.values()];
-}
-
-function rootFingerprint(state: TrailState, rootId: string | null): string {
-  if (!rootId || !state.nodes[rootId]) return "";
-  const ids: string[] = [];
-  const stack = [rootId];
-  const seen = new Set<string>();
-  while (stack.length) {
-    const id = stack.pop();
-    if (!id || seen.has(id) || !state.nodes[id]) continue;
-    seen.add(id);
-    ids.push(id);
-    stack.push(...state.nodes[id]!.children);
-  }
-  ids.sort();
-  const nodes = ids.map((id) => {
-    const node = state.nodes[id]!;
-    return [id, node.parent, node.type, node.label, node.state, node.note, node.blockedNote, node.children];
-  });
-  const sessions = Object.values(state.sessions)
-    .filter((session) => session.rootId === rootId)
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .map((session) => [session.id, session.cursor, session.lastTranscriptAt, session.snapshot]);
-  return JSON.stringify([nodes, sessions]);
-}
-
-function directoryFingerprint(state: TrailState): string {
-  return JSON.stringify(state.roots.map((rootId) => {
-    const root = state.nodes[rootId];
-    const sessions = Object.values(state.sessions)
-      .filter((session) => session.rootId === rootId)
-      .sort((left, right) => left.id.localeCompare(right.id))
-      .map((session) => [session.id, session.cursor, session.lastTranscriptAt, session.snapshot.summary]);
-    return [rootId, root?.label, state.archived.includes(rootId), sessions];
-  }));
-}
-
-function candidateIsFresh(
-  base: TrailState,
-  current: TrailState,
-  sessionId: string,
-  output: RollOutput,
-  snapshotOnly = false,
-): boolean {
-  const baseSource = base.sessions[sessionId]?.rootId ?? null;
-  const currentSource = current.sessions[sessionId]?.rootId ?? null;
-  if (baseSource !== currentSource || rootFingerprint(base, baseSource) !== rootFingerprint(current, currentSource)) {
-    return false;
-  }
-  if (snapshotOnly) return true;
-  const mainline = canonicalMainline(output.mainline);
-  if (!mainline) return true;
-  const baseTarget = base.mainlineIndex[mainline] ?? null;
-  const currentTarget = current.mainlineIndex[mainline] ?? null;
-  if (baseTarget) {
-    return baseTarget === currentTarget
-      && rootFingerprint(base, baseTarget) === rootFingerprint(current, currentTarget);
-  }
-  // Exact-name convergence is safe: a candidate that did not see this target can
-  // only grow from the root on an unattached/reattach round; TreeRuntime still
-  // rejects every stale or cross-mainline node reference.
-  if (currentTarget) return true;
-  return directoryFingerprint(base) === directoryFingerprint(current);
 }
 
 export function discoverAllTranscripts(
@@ -766,50 +703,42 @@ export class TranscriptWatcher {
       await this.#serializeCommit(() => this.#commitLive(delta, false));
       return;
     }
-    let base = this.store.snapshot();
+    const base = this.store.snapshot();
     const snapshotOnly = delta.lowSignal || !delta.text;
     if (snapshotOnly && !base.sessions[delta.meta.sessionId]) {
       await this.#serializeCommit(() => this.#commitLive(delta, false));
       return;
     }
-    this.#setActivity(item, "rolling");
-    let output = await this.#invokeRoll(
-      base.engine,
-      buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
-        ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
-        snapshotOnly,
-      }),
-      source,
-      "live",
-      "initial",
-    );
-    for (let staleRetries = 0; staleRetries <= STALE_RETRY_LIMIT; staleRetries += 1) {
-      this.#setActivity(item, "validating");
-      const result = await this.#serializeCommit(async () => {
+    await runRollCandidateLoop({
+      initialState: base,
+      staleError: "live roll candidate stayed stale",
+      onValidating: () => this.#setActivity(item, "validating"),
+      invoke: async (candidateState, attempt) => {
+        this.#setActivity(item, "rolling");
+        return this.#invokeRoll(
+          candidateState.engine,
+          buildRollPrompt(candidateState, candidateState.sessions[delta.meta.sessionId], delta.text, {
+            ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+            snapshotOnly,
+          }),
+          source,
+          "live",
+          attempt,
+        );
+      },
+      validateAndCommit: async (candidateState, output) => this.#serializeCommit(async () => {
         const currentOffset = storedOffset(this.store.snapshot(), source);
         if ((currentOffset?.offset ?? 0) !== initialOffset) return { done: true, current: null };
         const current = this.store.snapshot();
-        if (!candidateIsFresh(base, current, delta.meta.sessionId, output, snapshotOnly)) return { done: false, current };
+        if (!candidateIsFresh(candidateState, current, delta.meta.sessionId, output, snapshotOnly)) {
+          return { done: false, current };
+        }
         this.#setActivity(item, "committing");
         await this.#commitLive(delta, false);
         await this.#apply(delta.meta, output, snapshotOnly);
         return { done: true, current: null };
-      });
-      if (result.done) return;
-      if (staleRetries === STALE_RETRY_LIMIT || !result.current) throw new Error("live roll candidate stayed stale");
-      base = result.current;
-      this.#setActivity(item, "rolling");
-      output = await this.#invokeRoll(
-        base.engine,
-        buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
-          ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
-          snapshotOnly,
-        }),
-        source,
-        "live",
-        "stale-retry",
-      );
-    }
+      }),
+    });
   }
 
   async #processHistory(work: WorkItem): Promise<void> {
@@ -851,23 +780,33 @@ export class TranscriptWatcher {
       await this.#serializeCommit(() => this.#commitHistory(historyKey, historyJobId, item.cursor, delta));
       return;
     }
-    let base = this.store.snapshot();
+    const base = this.store.snapshot();
     const snapshotOnly = delta.lowSignal || !delta.text;
     if (snapshotOnly && !base.sessions[delta.meta.sessionId]) {
       await this.#serializeCommit(() => this.#commitHistory(historyKey, historyJobId, item.cursor, delta));
       return;
     }
-    const prompt = buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
-      historical: true,
-      reconcile: item.reconcile,
-      ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
-      snapshotOnly,
-    });
-    this.#setActivity(work, "rolling");
-    let output = await this.#invokeRoll(base.engine, prompt, source, "history", "initial");
-    for (let staleRetries = 0; staleRetries <= STALE_RETRY_LIMIT; staleRetries += 1) {
-      this.#setActivity(work, "validating");
-      const result = await this.#serializeCommit(async () => {
+    await runRollCandidateLoop({
+      initialState: base,
+      staleError: "history roll candidate stayed stale",
+      onValidating: () => this.#setActivity(work, "validating"),
+      invoke: async (candidateState, attempt) => {
+        const currentItem = candidateState.intake.job?.items[historyKey];
+        this.#setActivity(work, "rolling");
+        return this.#invokeRoll(
+          candidateState.engine,
+          buildRollPrompt(candidateState, candidateState.sessions[delta.meta.sessionId], delta.text, {
+            historical: true,
+            reconcile: currentItem?.reconcile ?? item.reconcile,
+            ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
+            snapshotOnly,
+          }),
+          source,
+          "history",
+          attempt,
+        );
+      },
+      validateAndCommit: async (candidateState, output) => this.#serializeCommit(async () => {
         const current = this.store.snapshot();
         const currentJob = current.intake.job;
         const currentItem = currentJob?.items[historyKey];
@@ -875,30 +814,15 @@ export class TranscriptWatcher {
           || currentItem?.status !== "running" || currentItem.cursor !== item.cursor) {
           return { done: true, current: null };
         }
-        if (!candidateIsFresh(base, current, delta.meta.sessionId, output, snapshotOnly)) return { done: false, current };
+        if (!candidateIsFresh(candidateState, current, delta.meta.sessionId, output, snapshotOnly)) {
+          return { done: false, current };
+        }
         this.#setActivity(work, "committing");
         const committed = await this.#commitHistory(historyKey, historyJobId, item.cursor, delta);
         if (committed) await this.#apply(delta.meta, output, snapshotOnly);
         return { done: true, current: null };
-      });
-      if (result.done) return;
-      if (staleRetries === STALE_RETRY_LIMIT || !result.current) throw new Error("history roll candidate stayed stale");
-      base = result.current;
-      const currentItem = base.intake.job?.items[historyKey];
-      this.#setActivity(work, "rolling");
-      output = await this.#invokeRoll(
-        base.engine,
-        buildRollPrompt(base, base.sessions[delta.meta.sessionId], delta.text, {
-          historical: true,
-          reconcile: currentItem?.reconcile ?? item.reconcile,
-          ...(delta.summaryHint ? { summaryHint: delta.summaryHint } : {}),
-          snapshotOnly,
-        }),
-        source,
-        "history",
-        "stale-retry",
-      );
-    }
+      }),
+    });
   }
 
   async #apply(meta: TranscriptMeta, output: RollOutput, snapshotOnly = false): Promise<void> {

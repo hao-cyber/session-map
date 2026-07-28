@@ -1,15 +1,12 @@
 import {
-  MAX_OPS,
   MAX_SUMMARY_HINT_BYTES,
   MAX_SUBTREE_LINES,
   ROLL_SENTINEL,
-  SESSION_PROGRESS_CHARS,
-  SESSION_SUMMARY_CHARS,
-  SESSION_TRAIL_ITEM_CHARS,
   SESSION_TRAIL_ITEMS,
 } from "./constants.ts";
-import type { ProviderSummaryHint, RollOutput, SessionRecord, TrailState } from "./types.ts";
-import { byteLength, isRecord, truncateBytes } from "./utils.ts";
+import { ROLL_OUTPUT_SHAPE, rollRuntimeContract } from "./roll-contract.ts";
+import type { ProviderSummaryHint, SessionRecord, TrailState } from "./types.ts";
+import { byteLength, truncateBytes } from "./utils.ts";
 
 function rootLines(state: TrailState, rootId: string, maxLines: number): string[] {
   const lines: string[] = [];
@@ -117,29 +114,13 @@ ROLLING SESSION SNAPSHOT
 - snapshot.progress is the newest meaningful state, result, blocker, or next move. It should answer "where is this session now?" without vague progress language.
 - snapshot.trail is 2-${SESSION_TRAIL_ITEMS} causal breadcrumbs for quick expansion: intent, decisive attempt/finding, rejected path, decision, and current direction. Prefer "A failed because B" over chronological narration.
 
-RUNTIME CONTRACT
-- Return one JSON object only, with no prose and no code fence.
-- At most ${MAX_OPS} ops.
-- mainline <= 48 characters; node labels <= 20 characters; ask.hint <= 16 characters.
-- snapshot.summary <= ${SESSION_SUMMARY_CHARS} characters; snapshot.progress <= ${SESSION_PROGRESS_CHARS}; each snapshot.trail item <= ${SESSION_TRAIL_ITEM_CHARS}.
-- Allowed node types: goal, task, attempt, finding, blocker, decision, note.
-- For grow at the root, parent may be the literal "mainline" or the exact mainline value. Prefer "mainline". Otherwise parent must be an existing node id from CURRENT SESSION SUBTREE.
-- Allowed ops:
-  {"op":"grow","parent":"<node-id|mainline>","type":"<node-type>","label":"..."}
-  {"op":"close","node":"<node-id>","state":"resolved|dead","note":"reason"}
-  {"op":"block","node":"<node-id>","note":"what is awaited"}
-  {"op":"unblock","node":"<node-id>"}
-  {"op":"rename","node":"<node-id>","label":"..."}
-  {"op":"refocus","node":"<node-id>"}
-- The runtime allocates ids and rejects cross-mainline writes. Never invent an id for an existing node.
-- unblock applies only to a waiting node. resolved/dead outcomes cannot be reopened; represent reconsideration with grow.
-- ask.kind is decision, review, reply, or none. This is a semantic judgment about what the user is being asked to do now.
+${rollRuntimeContract()}
 ${historyContract}
 ${summaryContract}
 ${snapshotOnlyContract}
 
 OUTPUT SHAPE
-{"mainline":"existing or new semantic mainline","ask":{"kind":"decision|review|reply|none","hint":"short"},"snapshot":{"summary":"whole-session headline","progress":"latest meaningful state","trail":["causal breadcrumb"]},"ops":[]}
+${ROLL_OUTPUT_SHAPE}
 
 EXISTING MAINLINES
 ${mainlines}
@@ -154,83 +135,4 @@ FILTERED TRANSCRIPT INCREMENT
 <delta>
 ${truncateBytes(delta, 12 * 1024)}
 </delta>`;
-}
-
-function unwrapRoll(value: unknown): RollOutput | null {
-  if (isRecord(value)) {
-    if (typeof value.mainline === "string" && Array.isArray(value.ops)) {
-      const ask = isRecord(value.ask) ? value.ask : { kind: "none", hint: "" };
-      return {
-        mainline: value.mainline,
-        ask: {
-          kind: typeof ask.kind === "string" ? (ask.kind as RollOutput["ask"]["kind"]) : "none",
-          hint: typeof ask.hint === "string" ? ask.hint : "",
-        },
-        ...(value.snapshot !== undefined ? { snapshot: value.snapshot } : {}),
-        ops: value.ops,
-      };
-    }
-    for (const key of ["result", "output", "content", "response", "text", "message", "item", "data"]) {
-      const nested = value[key];
-      if (typeof nested === "string") {
-        const parsed = extractRollOutput(nested);
-        if (parsed) return parsed;
-      } else if (nested !== undefined) {
-        const parsed = unwrapRoll(nested);
-        if (parsed) return parsed;
-      }
-    }
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      const parsed = unwrapRoll(item);
-      if (parsed) return parsed;
-    }
-  }
-  return null;
-}
-function balancedObjects(text: string): string[] {
-  const objects: string[] = [];
-  for (let start = 0; start < text.length; start += 1) {
-    if (text[start] !== "{") continue;
-    let depth = 0;
-    let quoted = false;
-    let escaped = false;
-    for (let index = start; index < text.length; index += 1) {
-      const char = text[index];
-      if (quoted) {
-        if (escaped) escaped = false;
-        else if (char === "\\") escaped = true;
-        else if (char === '"') quoted = false;
-        continue;
-      }
-      if (char === '"') quoted = true;
-      else if (char === "{") depth += 1;
-      else if (char === "}") {
-        depth -= 1;
-        if (depth === 0) {
-          objects.push(text.slice(start, index + 1));
-          start = index;
-          break;
-        }
-      }
-    }
-  }
-  return objects;
-}
-
-export function extractRollOutput(output: string): RollOutput | null {
-  const trimmed = output.trim();
-  try {
-    const direct = unwrapRoll(JSON.parse(trimmed));
-    if (direct) return direct;
-  } catch {}
-  let found: RollOutput | null = null;
-  for (const candidate of balancedObjects(trimmed)) {
-    try {
-      const parsed = unwrapRoll(JSON.parse(candidate));
-      if (parsed) found = parsed;
-    } catch {}
-  }
-  return found;
 }

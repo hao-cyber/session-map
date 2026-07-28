@@ -97,9 +97,14 @@ describe("private workspace boundaries", () => {
     expect(imports("packages/core/src/state-repair.ts")).not.toContain("node:fs");
     expect(imports("packages/core/src/state-repair.ts")).not.toContain("./state-store.ts");
     expect(imports("packages/core/src/roll.ts")).not.toContain("./roll-engine.ts");
-    expect(imports("packages/core/src/roll-engine.ts")).toContain("./roll.ts");
+    expect(imports("packages/core/src/roll-engine.ts")).toContain("./roll-contract.ts");
+    expect(imports("packages/core/src/roll-contract.ts")).not.toContain("./state-store.ts");
+    expect(imports("packages/core/src/roll-candidate.ts")).not.toContain("./state-store.ts");
+    expect(imports("packages/core/src/tree-roll.ts")).not.toContain("./state-store.ts");
 
     const rollProtocol = readFileSync(resolve(root, "packages/core/src/roll.ts"), "utf8");
     expect(rollProtocol).not.toMatch(/\bBun\.(?:spawn|which)|spawnSync|node:child_process/);
+    const rollContract = readFileSync(resolve(root, "packages/core/src/roll-contract.ts"), "utf8");
+    expect(rollContract).not.toMatch(/node:fs|\bBun\./);
   });
 });
